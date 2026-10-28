@@ -23,10 +23,21 @@ def connect() -> sqlite3.Connection:
     return conn
 
 
+# Columns added after a table first shipped: (table, column, definition). CREATE TABLE IF NOT EXISTS
+# doesn't touch existing tables, so databases made earlier get them here.
+ADDED_COLUMNS = [
+    ("repos", "private_mode", "INTEGER NOT NULL DEFAULT 0"),
+]
+
+
 def init_db() -> None:
     conn = connect()
     try:
         conn.executescript(SCHEMA.read_text(encoding="utf-8"))
+        for table, column, definition in ADDED_COLUMNS:
+            have = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
+            if column not in have:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
     finally:
         conn.close()
 

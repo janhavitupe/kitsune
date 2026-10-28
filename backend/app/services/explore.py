@@ -99,15 +99,62 @@ def _branch_name(conn: sqlite3.Connection, repo_id: int, direction: str) -> str:
     return name
 
 
-def _variant(conn: sqlite3.Connection, img: np.ndarray, sha: str, direction: str, transform, mode: str) -> tuple[np.ndarray, str]:
+PRESET_WORDS: list[tuple[tuple[str, ...], Callable[[np.ndarray], np.ndarray]]] = [
+    (("warm", "golden", "sunset", "dusk", "sunny", "orange"), _golden_hour),
+    (("cool", "cold", "moon", "night", "blue", "icy"), _moonlit),
+    (("muted", "overcast", "desaturat", "grey", "gray", "foggy", "soft"), _overcast),
+]
+
+
+def preset_for(direction: str) -> Callable[[np.ndarray], np.ndarray] | None:
+    """The preset closest to a free-text direction ("warm it to match" → golden hour), if any."""
+    d = direction.lower()
+    return next((t for words, t in PRESET_WORDS if any(w in d for w in words)), None)
+
+
+def render(
+    conn: sqlite3.Connection, img: np.ndarray, sha: str, direction: str, mode: str = "auto",
+    transform: Callable[[np.ndarray], np.ndarray] | None = None,
+) -> tuple[np.ndarray, str]:
+    """`img` recolored toward `direction`: Muse Image (composition kept), or a preset transform."""
+    if mode not in MODES:
+        raise ExploreError(f"mode must be one of {', '.join(MODES)}")
+    transform = transform or preset_for(direction)
     if mode != "fast":
         try:
             return keep_composition(img, ai_image.recolor(conn, img, sha, direction)), "ai"
         except Exception as e:
             if mode == "ai" or transform is None:
                 raise ExploreError(f"Muse Image is unavailable: {e}", 503) from e
-            log.info("explore '%s' fell back to the preset transform: %s", direction, e)
+            log.info("'%s' fell back to the preset transform: %s", direction, e)
+    if transform is None:
+        raise ExploreError(f"No preset matches '{direction}'; that direction needs Muse Image")
     return _rgb(transform(_lab(img))), "fast"
+
+
+def save(conn: sqlite3.Connection, img: np.ndarray) -> str:
+    out = io.BytesIO()
+    Image.fromarray(img).save(out, format="PNG", compress_level=storage.PNG_COMPRESS_LEVEL)
+    return storage.put_image(conn, out.getvalue())["sha256"]
+
+
+def branch_variant(
+    conn: sqlite3.Connection, source: sqlite3.Row, direction: str, img: np.ndarray, used: str, origin: str = "explore",
+) -> int:
+    """Put a rendered variant of `source` on a new explore branch. Returns the commit id."""
+    branch_id = conn.execute(
+        "INSERT INTO branches (repo_id, name, head_commit_id, kind, created_at) VALUES (?, ?, ?, 'explore', ?)",
+        (source["repo_id"], _branch_name(conn, source["repo_id"], direction), source["id"], now()),
+    ).lastrowid
+    return commits.create(
+        conn,
+        repo_id=source["repo_id"],
+        branch_id=branch_id,
+        blob_sha=save(conn, img),
+        message=f"Explore: {direction} palette",
+        origin=origin,
+        origin_meta={"source_commit": source["id"], "direction": direction, "method": used},
+    )
 
 
 def explore(conn: sqlite3.Connection, commit_id: int, prompt: str | None = None, mode: str = "auto") -> list[int]:
@@ -129,24 +176,6 @@ def explore(conn: sqlite3.Connection, commit_id: int, prompt: str | None = None,
         directions = PRESETS
 
     img = np.asarray(storage.load_rgb(conn, source["blob_sha"]))
-    rendered = [(d, *_variant(conn, img, source["blob_sha"], d, t, mode)) for d, t in directions]
-
-    ids = []
-    for direction, variant, used in rendered:
-        out = io.BytesIO()
-        Image.fromarray(variant).save(out, format="PNG", compress_level=storage.PNG_COMPRESS_LEVEL)
-        blob = storage.put_image(conn, out.getvalue())
-        branch_id = conn.execute(
-            "INSERT INTO branches (repo_id, name, head_commit_id, kind, created_at) VALUES (?, ?, ?, 'explore', ?)",
-            (source["repo_id"], _branch_name(conn, source["repo_id"], direction), commit_id, now()),
-        ).lastrowid
-        ids.append(commits.create(
-            conn,
-            repo_id=source["repo_id"],
-            branch_id=branch_id,
-            blob_sha=blob["sha256"],
-            message=f"Explore: {direction} palette",
-            origin="explore",
-            origin_meta={"source_commit": commit_id, "direction": direction, "method": used},
-        ))
-    return ids
+    # Render all three before writing anything, so a failure leaves no half-made set of branches.
+    rendered = [(d, *render(conn, img, source["blob_sha"], d, mode, t)) for d, t in directions]
+    return [branch_variant(conn, source, d, variant, used) for d, variant, used in rendered]

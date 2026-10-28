@@ -4,7 +4,8 @@
 CREATE TABLE IF NOT EXISTS repos (
   id INTEGER PRIMARY KEY,
   name TEXT NOT NULL,
-  created_at TEXT NOT NULL
+  created_at TEXT NOT NULL,
+  private_mode INTEGER NOT NULL DEFAULT 0       -- 1: captions and query reading on open weights only
 );
 
 CREATE TABLE IF NOT EXISTS blobs (

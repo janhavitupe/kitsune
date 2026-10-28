@@ -56,6 +56,22 @@ class Repo(BaseModel):
     id: int
     name: str
     created_at: str
+    private_mode: bool
+
+
+class RepoUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=100)
+    private_mode: bool | None = None
+
+
+class CaptionIn(BaseModel):
+    caption: str = Field(min_length=1, max_length=2000)
+    model: str = Field(min_length=1, max_length=100)
+
+
+class MissingCaption(BaseModel):
+    blob_sha: str
+    image_url: str
 
 
 class RepoDetail(Repo):

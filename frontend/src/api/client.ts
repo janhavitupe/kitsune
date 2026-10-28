@@ -8,6 +8,19 @@ export interface Repo {
   id: number;
   name: string;
   created_at: string;
+  private_mode: boolean;
+}
+
+export type AssistantEvent =
+  | { type: "plan"; text: string }
+  | { type: "tool_call"; step: number; name: string; arguments: Record<string, unknown> }
+  | { type: "tool_result"; step: number; name: string; result?: Record<string, unknown>; error?: string }
+  | { type: "final"; text: string; created: number[]; working_commit: number | null; branch: string | null }
+  | { type: "error"; message: string };
+
+export interface Story {
+  markdown: string;
+  source: "wonder" | "template";
 }
 
 export interface Branch {
@@ -159,6 +172,28 @@ export const api = {
   listRepos: () => request<Repo[]>("/api/repos"),
   createRepo: (name: string) => request<RepoDetail>("/api/repos", json({ name })),
   getRepo: (id: number) => request<RepoDetail>(`/api/repos/${id}`),
+  updateRepo: (id: number, patch: { name?: string; private_mode?: boolean }) =>
+    request<RepoDetail>(`/api/repos/${id}`, { ...json(patch), method: "PATCH" }),
+  story: (repoId: number) => request<Story>(`/api/repos/${repoId}/story`, { method: "POST" }),
+  /** Run the studio assistant, calling onEvent for each server-sent event as it arrives. */
+  runAssistant: async (repoId: number, ask: string, onEvent: (e: AssistantEvent) => void, startCommit?: number) => {
+    const res = await fetch(`${BASE}/api/repos/${repoId}/assistant`, json({ ask, start_commit: startCommit ?? null }));
+    if (!res.ok || !res.body) throw new ApiError(res.status, res.statusText);
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const chunks = buffer.split("\n\n");
+      buffer = chunks.pop() ?? "";
+      for (const chunk of chunks) {
+        const line = chunk.split("\n").find((l) => l.startsWith("data: "));
+        if (line) onEvent(JSON.parse(line.slice(6)) as AssistantEvent);
+      }
+    }
+  },
   listCommits: (repoId: number) => request<Commit[]>(`/api/repos/${repoId}/commits`),
   createBranch: (repoId: number, name: string, fromCommit: number | null) =>
     request<Branch>(`/api/repos/${repoId}/branches`, json({ name, from_commit: fromCommit })),

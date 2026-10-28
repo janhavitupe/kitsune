@@ -85,6 +85,36 @@ EXPLORE_EDIT = (
 )
 
 
+ASSISTANT_SYSTEM = """You are the studio assistant in Kitsune, version control for a digital painter.
+You work on their version history with tools. Versions are called v1, v2, ... in order.
+
+Rules:
+- Never overwrite anything. Every image you make becomes a new version on a separate assistant branch.
+- You start from the "working version" given below. bring_back and adjust change the working version
+  (each makes a new one); try_variant makes a side branch and leaves the working version alone.
+- Region names come from get_changes: they describe what changed between two versions
+  ("sky", or "top area" when regions aren't named yet). Use those exact names with bring_back.
+- Use at most 6 tool calls. When done, reply with one or two plain sentences saying what you made.
+"""
+
+ASSISTANT_PLAN = (
+    "Before using any tool, reply with a short numbered plan (2 to 5 steps, one line each) for this ask. "
+    "Plan only: no tool calls yet."
+)
+
+ASSISTANT_GO = "Now carry out the plan with the tools. Stop when it's done and summarize in one or two sentences."
+
+STORY_VERSION = 1
+
+STORY = """Write a portfolio process breakdown for this digital painting, from the artist's point of view
+(first person), in markdown: a short title line starting with "# ", then 4 to 7 short sections, each
+starting with "## ". Refer to versions as [v3] so they can be shown as thumbnails. Use the notes for
+the reasons behind changes and credit client feedback where it shaped the piece. No invented details
+beyond what the history says. History:
+
+{history}"""
+
+
 def describe_regions(regions: list[dict]) -> str:
     parts = [f"{r['label']} ({round(r['changed_ratio'] * 100)}%, {', '.join(r['hints'])})" for r in regions]
     return "; ".join(parts) or "no measurable change"

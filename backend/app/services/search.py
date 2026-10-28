@@ -9,7 +9,7 @@ import logging
 import re
 import sqlite3
 
-from app.ai import spark
+from app.ai import openweights, spark
 from app.services import diffing
 
 log = logging.getLogger("kitsune.search")
@@ -72,10 +72,13 @@ def _match(conn: sqlite3.Connection, repo_id: int, words: list[str], limit: int,
     return rows
 
 
-def parse(conn: sqlite3.Connection, query: str) -> dict:
-    """Split a query into relation / anchor / terms: Muse Spark when available, rules otherwise."""
+def parse(conn: sqlite3.Connection, query: str, private: bool = False) -> dict:
+    """Split a query into relation / anchor / terms: a model when available (Muse Spark, or the
+    open-weights model in private mode), rules otherwise."""
     if TEMPORAL.search(query):
         try:
+            if private:
+                return {**openweights.rewrite_query(conn, query), "parser": "open-weights"}
             return {**spark.rewrite_query(conn, query), "parser": "spark"}
         except Exception as e:
             log.info("query rewrite fell back to rules: %s", e)
@@ -91,7 +94,8 @@ def parse(conn: sqlite3.Connection, query: str) -> dict:
 
 
 def search(conn: sqlite3.Connection, repo_id: int, query: str, limit: int = 20) -> dict:
-    p = parse(conn, query)
+    private = bool(conn.execute("SELECT private_mode FROM repos WHERE id = ?", (repo_id,)).fetchone()[0])
+    p = parse(conn, query, private)
     results: list[dict] = []
 
     if p["relation"] and (anchor_words := tokens(p["anchor"])):

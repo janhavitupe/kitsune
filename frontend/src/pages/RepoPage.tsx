@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, type Commit, type RepoDetail } from "../api/client";
+import AssistantPanel from "../components/AssistantPanel";
 import CommitDetail from "../components/CommitDetail";
 import CompareView from "../components/CompareView";
 import ExploreDialog from "../components/ExploreDialog";
 import MergeDialog from "../components/MergeDialog";
 import SearchBar from "../components/SearchBar";
+import StoryView from "../components/StoryView";
 import Timeline from "../components/Timeline";
 import UploadDialog from "../components/UploadDialog";
 
@@ -28,6 +30,8 @@ export default function RepoPage({ repoId, onBack }: Props) {
   const [uploadOpen, setUploadOpen] = useState(false);
   const [mergeOpen, setMergeOpen] = useState(false);
   const [exploring, setExploring] = useState<Commit | null>(null);
+  const [assistantOpen, setAssistantOpen] = useState(false);
+  const [storyOpen, setStoryOpen] = useState(false);
   const [found, setFound] = useState<number[]>([]);
   const [error, setError] = useState<string | null>(null);
 
@@ -125,7 +129,29 @@ export default function RepoPage({ repoId, onBack }: Props) {
         </button>
         <span className="text-zinc-600">/</span>
         <h1 className="truncate font-medium">{repo.name}</h1>
-        <div className="ml-auto flex items-center gap-2">
+        <label
+          className="flex cursor-pointer items-center gap-1.5 text-xs text-zinc-400"
+          title="Captions and search run on self-hosted open weights, never the hosted API. Segmentation and image edits still use the hosted API."
+        >
+          <input
+            type="checkbox"
+            checked={repo.private_mode}
+            onChange={async (e) => setRepo(await api.updateRepo(repo.id, { private_mode: e.target.checked }))}
+            className="accent-orange-500"
+          />
+          Private
+        </label>
+        <div className="ml-auto flex flex-wrap items-center gap-2">
+          {commits.length > 0 && (
+            <>
+              <button onClick={() => setStoryOpen(true)} className="rounded-md border border-zinc-700 px-3 py-1.5 text-sm hover:bg-zinc-900">
+                Story
+              </button>
+              <button onClick={() => setAssistantOpen(true)} className="rounded-md border border-zinc-700 px-3 py-1.5 text-sm hover:bg-zinc-900">
+                Assistant
+              </button>
+            </>
+          )}
           <label className="text-sm text-zinc-400" htmlFor="branch">
             Branch
           </label>
@@ -133,7 +159,7 @@ export default function RepoPage({ repoId, onBack }: Props) {
             id="branch"
             value={branch}
             onChange={(e) => setBranch(e.target.value)}
-            className="rounded-md border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-sm"
+            className="max-w-48 truncate rounded-md border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-sm"
           >
             {branches.map((br) => (
               <option key={br.id} value={br.name}>
@@ -204,6 +230,23 @@ export default function RepoPage({ repoId, onBack }: Props) {
           />
         ) : null}
       </main>
+
+      {assistantOpen && (
+        <AssistantPanel
+          repoId={repo.id}
+          onClose={() => setAssistantOpen(false)}
+          onChanged={refresh}
+          onOpen={(id) => {
+            const c = byId.get(id);
+            if (c) setBranch(c.branch);
+            setSelected(c?.parent_id ? [c.parent_id, id] : [id]);
+          }}
+        />
+      )}
+
+      {storyOpen && (
+        <StoryView repoId={repo.id} commitsBySeq={new Map(commits.map((c) => [c.seq, c]))} onClose={() => setStoryOpen(false)} />
+      )}
 
       {exploring && (
         <ExploreDialog commit={exploring} branches={repo.branches} onClose={() => setExploring(null)} onChanged={refresh} />

@@ -16,7 +16,10 @@ def data_dir(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "ai_offline", False)
     # Tests never reach the real Model API, even when .env has a key; mock clients per test.
     monkeypatch.setattr(settings, "model_api_key", "")
+    monkeypatch.setattr(settings, "openweights_base_url", "")
+    monkeypatch.setattr(settings, "openweights_api_key", "")
     ai_client.model_api.cache_clear()
+    ai_client.openweights.cache_clear()
     db.init_db()
     return settings.data_dir
 

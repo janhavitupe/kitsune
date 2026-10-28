@@ -74,10 +74,15 @@ def build(
         raise CherryPickError(str(e), 503) from e
 
 
-def cherry_pick(conn: sqlite3.Connection, target_id: int, source_id: int, label: str, blend: str = "auto") -> int:
-    """Make the cherry-pick a new commit on top of the target. The target must be its branch's latest version."""
+def cherry_pick(
+    conn: sqlite3.Connection, target_id: int, source_id: int, label: str, blend: str = "auto",
+    branch_id: int | None = None,
+) -> int:
+    """Make the cherry-pick a new commit on top of the target, on the target's branch (or `branch_id`,
+    e.g. the assistant's branch). The target must be that branch's latest version."""
     target = _commit(conn, target_id)
-    head = conn.execute("SELECT head_commit_id FROM branches WHERE id = ?", (target["branch_id"],)).fetchone()[0]
+    branch_id = branch_id or target["branch_id"]
+    head = conn.execute("SELECT head_commit_id FROM branches WHERE id = ?", (branch_id,)).fetchone()[0]
     if head != target_id:
         raise CherryPickError("Bring regions back into the latest version of a branch", 409)
 
@@ -90,7 +95,7 @@ def cherry_pick(conn: sqlite3.Connection, target_id: int, source_id: int, label:
         return commits.create(
             conn,
             repo_id=target["repo_id"],
-            branch_id=target["branch_id"],
+            branch_id=branch_id,
             blob_sha=blob["sha256"],
             message=f"Brought back the {label} from v{source['seq']}",
             origin="cherry_pick",
