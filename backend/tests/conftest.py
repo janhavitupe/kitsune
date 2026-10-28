@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 from PIL import Image
 
 from app import db
+from app.ai import client as ai_client
 from app.config import settings
 
 
@@ -13,6 +14,9 @@ def data_dir(tmp_path, monkeypatch):
     """Every test gets an empty data dir and a fresh database."""
     monkeypatch.setattr(settings, "data_dir", tmp_path / "data")
     monkeypatch.setattr(settings, "ai_offline", False)
+    # Tests never reach the real Model API, even when .env has a key; mock clients per test.
+    monkeypatch.setattr(settings, "model_api_key", "")
+    ai_client.model_api.cache_clear()
     db.init_db()
     return settings.data_dir
 
@@ -51,13 +55,21 @@ def repo(client):
 
 @pytest.fixture
 def upload(client):
-    def _upload(repo_id, color, branch="main", message=None):
+    """Upload a version: `image` is an RGB color tuple (solid image) or a PIL image."""
+
+    def _upload(repo_id, image, branch="main", message=None):
         data = {"branch": branch}
         if message is not None:
             data["message"] = message
+        if isinstance(image, Image.Image):
+            out = io.BytesIO()
+            image.save(out, format="PNG")
+            png = out.getvalue()
+        else:
+            png = image_bytes(image)
         r = client.post(
             f"/api/repos/{repo_id}/commits",
-            files={"image": ("v.png", image_bytes(color), "image/png")},
+            files={"image": ("v.png", png, "image/png")},
             data=data,
         )
         assert r.status_code == 201, r.text

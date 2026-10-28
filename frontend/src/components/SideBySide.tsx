@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type PointerEvent } from "react";
+import { useEffect, useRef, useState, type PointerEvent, type ReactNode } from "react";
 import { assetUrl, type Commit } from "../api/client";
 
 interface View {
@@ -12,8 +12,8 @@ const MAX_SCALE = 8;
 
 const clampScale = (s: number) => Math.min(MAX_SCALE, Math.max(1, s));
 
-/** Two versions side by side (stacked on narrow screens) sharing one zoom and pan. */
-export default function SideBySide({ a, b }: { a: Commit; b: Commit }) {
+/** Two versions side by side (stacked on narrow screens) sharing one zoom and pan. `overlay` goes on b. */
+export default function SideBySide({ a, b, overlay }: { a: Commit; b: Commit; overlay?: ReactNode }) {
   const [view, setView] = useState<View>(RESET);
   const zoom = (factor: number) =>
     setView((v) => {
@@ -25,7 +25,9 @@ export default function SideBySide({ a, b }: { a: Commit; b: Commit }) {
     <div>
       <div className="grid gap-2 md:grid-cols-2">
         <Pane commit={a} view={view} setView={setView} />
-        <Pane commit={b} view={view} setView={setView} />
+        <Pane commit={b} view={view} setView={setView}>
+          {overlay}
+        </Pane>
       </div>
       <div className="mt-2 flex items-center justify-center gap-2 text-sm">
         <button onClick={() => zoom(1 / 1.5)} className="rounded-md border border-zinc-700 px-3 py-1 hover:bg-zinc-900" aria-label="Zoom out">
@@ -44,7 +46,14 @@ export default function SideBySide({ a, b }: { a: Commit; b: Commit }) {
   );
 }
 
-function Pane({ commit, view, setView }: { commit: Commit; view: View; setView: (f: (v: View) => View) => void }) {
+interface PaneProps {
+  commit: Commit;
+  view: View;
+  setView: (f: (v: View) => View) => void;
+  children?: ReactNode;
+}
+
+function Pane({ commit, view, setView, children }: PaneProps) {
   const ref = useRef<HTMLDivElement>(null);
   const last = useRef<{ x: number; y: number } | null>(null);
 
@@ -87,13 +96,11 @@ function Pane({ commit, view, setView }: { commit: Commit; view: View; setView: 
       className="relative overflow-hidden rounded-md bg-zinc-900 select-none"
       style={{ aspectRatio: `${commit.width} / ${commit.height}`, maxHeight: "70vh", cursor: view.scale > 1 ? "grab" : "default" }}
     >
-      <img
-        src={assetUrl(commit.image_url)}
-        alt={`Version ${commit.seq}`}
-        className="h-full w-full object-contain"
-        style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})` }}
-        draggable={false}
-      />
+      {/* The overlay shares the image's transform so regions stay pinned while zooming and panning. */}
+      <div className="relative h-full w-full" style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})` }}>
+        <img src={assetUrl(commit.image_url)} alt={`Version ${commit.seq}`} className="h-full w-full object-contain" draggable={false} />
+        {children}
+      </div>
       <span className="absolute top-2 left-2 rounded bg-black/60 px-2 py-0.5 text-xs">v{commit.seq}</span>
     </div>
   );

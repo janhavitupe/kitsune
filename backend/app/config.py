@@ -32,6 +32,13 @@ class Settings(BaseSettings):
     max_side_px: int = 8000
     thumb_px: int = 320
 
+    # Visual diff (tune on real artwork; see M2 doc)
+    diff_analysis_px: int = 1536  # diffs run on a copy scaled to this long side
+    diff_delta_e: float = 12.0  # per-pixel Lab distance that counts as "changed"
+    diff_min_component: float = 0.0005  # drop change specks smaller than this share of the image
+    diff_min_region_change: float = 0.05  # a region is "changed" above this share of its pixels
+    region_min_area: float = 0.005  # drop SAM masks smaller than this share of the image
+
     @property
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]

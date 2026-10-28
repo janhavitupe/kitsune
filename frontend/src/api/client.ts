@@ -44,6 +44,31 @@ export interface Commit {
   thumb_url: string;
 }
 
+export interface ChangedRegion {
+  label: string;
+  source: string; // "sam-3.1" for named regions, "change" for position-named change areas
+  region_id: number | null;
+  changed_px: number;
+  changed_ratio: number;
+  image_share: number;
+  bbox: [number, number, number, number]; // x, y, w, h as fractions of the image
+  hints: string[];
+  polygons: [number, number][][];
+}
+
+export interface Diff {
+  id: number;
+  from_commit: number;
+  to_commit: number;
+  summary: string;
+  regions: ChangedRegion[];
+  changed_fraction: number;
+  resized: boolean;
+  segmented: boolean;
+  size: [number, number];
+  change_mask_url: string;
+}
+
 export class ApiError extends Error {
   constructor(
     public status: number,
@@ -84,6 +109,7 @@ export const api = {
   listCommits: (repoId: number) => request<Commit[]>(`/api/repos/${repoId}/commits`),
   createBranch: (repoId: number, name: string, fromCommit: number | null) =>
     request<Branch>(`/api/repos/${repoId}/branches`, json({ name, from_commit: fromCommit })),
+  getDiff: (from: number, to: number) => request<Diff>(`/api/diff?from=${from}&to=${to}`),
   uploadCommit: (repoId: number, file: File, branch: string, message: string) => {
     const form = new FormData();
     form.append("image", file);

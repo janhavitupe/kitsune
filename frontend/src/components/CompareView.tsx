@@ -1,7 +1,9 @@
-import { useState } from "react";
-import type { Commit } from "../api/client";
+import { useEffect, useState } from "react";
+import { api, type Commit, type Diff } from "../api/client";
 import { commitTitle, cx } from "../lib/format";
 import CompareSlider from "./CompareSlider";
+import DiffPanel from "./DiffPanel";
+import RegionOverlay, { type OverlayMode } from "./RegionOverlay";
 import SideBySide from "./SideBySide";
 
 type Mode = "slider" | "side";
@@ -9,6 +11,28 @@ type Mode = "slider" | "side";
 /** a is the older version, b the newer one. */
 export default function CompareView({ a, b, onClose }: { a: Commit; b: Commit; onClose: () => void }) {
   const [mode, setMode] = useState<Mode>("slider");
+  const [overlay, setOverlay] = useState<OverlayMode>("regions");
+  const [diff, setDiff] = useState<Diff | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [focus, setFocus] = useState<number | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    setDiff(null);
+    setError(null);
+    setFocus(null);
+    api.getDiff(a.id, b.id).then(
+      (d) => live && setDiff(d),
+      (e: Error) => live && setError(e.message),
+    );
+    return () => {
+      live = false;
+    };
+  }, [a.id, b.id]);
+
+  // The AI message describes a version against its parent, so only show it for that pair.
+  const message = b.parent_id === a.id ? b.auto_message : null;
+  const layer = <RegionOverlay diff={diff} mode={overlay} focus={focus} />;
 
   return (
     <div>
@@ -37,7 +61,20 @@ export default function CompareView({ a, b, onClose }: { a: Commit; b: Commit; o
         </div>
       </div>
 
-      {mode === "slider" ? <CompareSlider a={a} b={b} /> : <SideBySide a={a} b={b} />}
+      <div className="grid gap-4 lg:grid-cols-[1fr_300px]">
+        <div className="min-w-0">
+          {mode === "slider" ? <CompareSlider a={a} b={b} overlay={layer} /> : <SideBySide a={a} b={b} overlay={layer} />}
+        </div>
+        <DiffPanel
+          diff={diff}
+          error={error}
+          message={message}
+          mode={overlay}
+          onMode={setOverlay}
+          focus={focus}
+          onFocus={setFocus}
+        />
+      </div>
     </div>
   );
 }

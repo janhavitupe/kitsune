@@ -6,6 +6,7 @@ than file bytes means the same picture saved as a JPG, or as a PNG by a differen
 stored once. Thumbnails live next to them under data/thumbs/.
 """
 
+import base64
 import hashlib
 import io
 import os
@@ -86,6 +87,29 @@ def _make_thumb(sha: str, img: Image.Image) -> str:
     rel = _shard("thumbs", sha, "webp")
     _write_atomic(rel, out.getvalue())
     return rel
+
+
+def get_blob(conn: sqlite3.Connection, sha: str) -> sqlite3.Row:
+    row = conn.execute("SELECT * FROM blobs WHERE sha256 = ?", (sha,)).fetchone()
+    if row is None:
+        raise KeyError(f"blob {sha} not found")
+    return row
+
+
+def load_rgb(conn: sqlite3.Connection, sha: str, max_side: int | None = None) -> Image.Image:
+    """Open a stored blob as RGB, optionally scaled down so its long side is at most max_side."""
+    with Image.open(abs_path(get_blob(conn, sha)["path"])) as img:
+        img = img.convert("RGB")
+    if max_side and max(img.size) > max_side:
+        img.thumbnail((max_side, max_side), Image.Resampling.LANCZOS)
+    return img
+
+
+def data_uri(conn: sqlite3.Connection, sha: str, max_side: int = 1024) -> str:
+    """A downscaled JPEG data URI of a blob, for sending to vision models."""
+    out = io.BytesIO()
+    load_rgb(conn, sha, max_side).save(out, format="JPEG", quality=88)
+    return "data:image/jpeg;base64," + base64.b64encode(out.getvalue()).decode()
 
 
 def put_image(conn: sqlite3.Connection, data: bytes) -> sqlite3.Row:

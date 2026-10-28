@@ -1,7 +1,7 @@
 """Background analysis that runs after a commit has already been returned to the client.
 
-M1 only moves the status through pending -> running -> done. Later milestones append steps:
-M2 segmentation + diff + auto message, M4 caption + search index.
+Steps run in order: segment the image (SAM), then diff against the parent and write the auto
+message. M4 appends caption + search index.
 """
 
 import logging
@@ -9,11 +9,15 @@ import sqlite3
 from collections.abc import Callable
 
 from app import db
+from app.services import diffing, segmentation
 
 log = logging.getLogger("kitsune.jobs")
 
 AnalysisStep = Callable[[sqlite3.Connection, int], None]
-ANALYSIS_STEPS: list[AnalysisStep] = []
+ANALYSIS_STEPS: list[AnalysisStep] = [
+    segmentation.segment_commit,
+    diffing.diff_commit_with_parent,
+]
 
 
 def _set_status(conn: sqlite3.Connection, commit_id: int, status: str) -> None:

@@ -1,11 +1,12 @@
-import { useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
+import { useRef, useState, type KeyboardEvent, type PointerEvent, type ReactNode } from "react";
 import { assetUrl, type Commit } from "../api/client";
 
 /**
  * Before/after slider: a on the left of the divider, b on the right.
  * Works with mouse, pen and touch (pointer events), and with arrow keys on the handle.
+ * `overlay` is drawn over the whole image box (it describes b, whose aspect ratio the box uses).
  */
-export default function CompareSlider({ a, b }: { a: Commit; b: Commit }) {
+export default function CompareSlider({ a, b, overlay }: { a: Commit; b: Commit; overlay?: ReactNode }) {
   const [pos, setPos] = useState(50);
   const box = useRef<HTMLDivElement>(null);
 
@@ -46,6 +47,7 @@ export default function CompareSlider({ a, b }: { a: Commit; b: Commit }) {
           style={{ clipPath: `inset(0 0 0 ${pos}%)` }}
           draggable={false}
         />
+        {overlay}
 
         <span className="absolute top-2 left-2 rounded bg-black/60 px-2 py-0.5 text-xs">v{a.seq}</span>
         <span className="absolute top-2 right-2 rounded bg-black/60 px-2 py-0.5 text-xs">v{b.seq}</span>
