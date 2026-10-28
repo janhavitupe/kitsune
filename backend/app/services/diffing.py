@@ -21,7 +21,7 @@ from app.services import pixel_diff, region_diff, segmentation
 log = logging.getLogger("kitsune.diff")
 
 OVERLAY_RGBA = (249, 115, 22, 150)  # orange, matches the UI accent
-DIFF_VERSION = 3  # bump when the diff algorithm changes, so cached diffs are recomputed
+DIFF_VERSION = 4  # bump when the diff algorithm changes, so cached diffs are recomputed
 
 
 def _version() -> str:

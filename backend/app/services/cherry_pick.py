@@ -9,19 +9,14 @@ region ("sky") once segmentation runs, a position-named area before that.
 """
 
 import io
-import logging
 import sqlite3
 
 import numpy as np
 from PIL import Image
 
 from app import storage
-from app.ai import image as ai_image
-from app.services import commits, compose, diffing
-
-log = logging.getLogger("kitsune.cherry_pick")
-
-BLEND_MODES = ("auto", "ai", "fast")
+from app.services import blending, commits, compose, diffing
+from app.services.blending import BLEND_MODES
 
 
 class CherryPickError(ValueError):
@@ -70,28 +65,13 @@ def build(
     tgt = np.asarray(tgt_img)
     src = np.asarray(storage.load_rgb(conn, source["blob_sha"]).resize(size, Image.Resampling.LANCZOS))
 
-    mask = compose.resize_mask(mask_small, size)
-    a = compose.alpha(mask, compose.feather_radius(tgt.shape))
-    # The soft edge may only fall on pixels nothing else changed. Where it would reach into another
-    # changed region (the coat next to the sky), it would bleed the old version of that region in.
-    a[compose.resize_mask(others_small, size) & ~mask] = 0
-    out = compose.composite(tgt, src, a)
-    if blend == "fast":
-        return out, "fast"
-
-    band = compose.seam_band(a)
-    box = compose.padded_bbox(band)
-    if box is None:
-        return out, "fast"
-    x0, y0, x1, y1 = box
+    # The other changed regions are protected: the sky's soft edge must not pull the old coat in.
+    take = compose.resize_mask(mask_small, size)
+    protect = compose.resize_mask(others_small, size)
     try:
-        patch = ai_image.blend_seam(conn, out[y0:y1, x0:x1], band[y0:y1, x0:x1])
-    except Exception as e:  # no key, offline, unsupported request: fall back unless AI was demanded
-        if blend == "ai":
-            raise CherryPickError(f"AI seam blending is unavailable: {e}", 503) from e
-        log.info("seam blend fell back to fast: %s", e)
-        return out, "fast"
-    return compose.paste_inside(out, patch, band, box), "ai"
+        return blending.blend_into(conn, tgt, src, take, protect, blend)
+    except blending.BlendUnavailable as e:
+        raise CherryPickError(str(e), 503) from e
 
 
 def cherry_pick(conn: sqlite3.Connection, target_id: int, source_id: int, label: str, blend: str = "auto") -> int:

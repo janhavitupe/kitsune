@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, type Commit, type RepoDetail } from "../api/client";
 import CommitDetail from "../components/CommitDetail";
 import CompareView from "../components/CompareView";
+import MergeDialog from "../components/MergeDialog";
 import Timeline from "../components/Timeline";
 import UploadDialog from "../components/UploadDialog";
 
@@ -23,6 +24,7 @@ export default function RepoPage({ repoId, onBack }: Props) {
   const [selected, setSelected] = useState<number[]>(readSelection);
   const [pickingSecond, setPickingSecond] = useState(false);
   const [uploadOpen, setUploadOpen] = useState(false);
+  const [mergeOpen, setMergeOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
@@ -79,6 +81,14 @@ export default function RepoPage({ repoId, onBack }: Props) {
     if (c.parent_id) setSelected([c.parent_id, c.id]);
   };
 
+  // Show the merge result against the version it merged into, on the receiving branch.
+  const onMerged = async (c: Commit) => {
+    setMergeOpen(false);
+    await refresh();
+    setBranch(c.branch);
+    if (c.parent_id) setSelected([c.parent_id, c.id]);
+  };
+
   const onBranchCreated = async (name: string) => {
     await refresh();
     setBranch(name);
@@ -123,6 +133,11 @@ export default function RepoPage({ repoId, onBack }: Props) {
               </option>
             ))}
           </select>
+          {repo.branches.filter((br) => br.head_commit_id !== null).length > 1 && (
+            <button onClick={() => setMergeOpen(true)} className="rounded-md border border-zinc-700 px-3 py-1.5 text-sm hover:bg-zinc-900">
+              Merge…
+            </button>
+          )}
           <button onClick={() => setUploadOpen(true)} className="rounded-md bg-orange-600 px-3 py-1.5 text-sm font-medium hover:bg-orange-500">
             Upload version
           </button>
@@ -177,6 +192,17 @@ export default function RepoPage({ repoId, onBack }: Props) {
           />
         ) : null}
       </main>
+
+      {mergeOpen && (
+        <MergeDialog
+          repoId={repo.id}
+          branches={repo.branches}
+          commitsById={byId}
+          defaultSource={branch !== "main" ? branch : (repo.branches.find((br) => br.name !== "main")?.name ?? "main")}
+          onClose={() => setMergeOpen(false)}
+          onMerged={onMerged}
+        />
+      )}
 
       {uploadOpen && (
         <UploadDialog repoId={repo.id} branch={branch} onClose={() => setUploadOpen(false)} onUploaded={onUploaded} />

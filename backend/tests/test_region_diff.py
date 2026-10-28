@@ -1,5 +1,5 @@
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageDraw
 
 from app.services.diffing import summarize
 from app.services.pixel_diff import change_mask, to_array, to_lab
@@ -79,6 +79,17 @@ def test_gradient_sky_and_repainted_coat_are_two_areas():
     a = gradient_sky((90, 140, 210), (170, 200, 235))
     b = gradient_sky((70, 60, 140), (240, 150, 90), figure=(40, 70, 140))
     assert sorted(r.label for r in run(a, b, [])) == ["center area", "top area"]
+
+
+def test_a_patch_and_its_soft_edge_are_one_area():
+    out = run(scene(), scene(extra=((20, 20, 90, 70), (230, 90, 160))), regions=[])
+    assert [r.label for r in out] == ["top-left area"]
+
+
+def test_a_thin_new_line_on_its_own_is_kept():
+    b = scene()
+    ImageDraw.Draw(b).line((380, 60, 460, 80), fill=(30, 30, 40), width=3)
+    assert [r.label for r in run(scene(), b, regions=[])] == ["top-right area"]
 
 
 def test_kind_split_is_deterministic():

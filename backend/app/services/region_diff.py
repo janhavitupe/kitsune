@@ -34,6 +34,8 @@ KMEANS_SAMPLE = 20000
 BOUNDARY_STEP = 4
 SMOOTH_JUMP = 15.0
 MIN_BOUNDARY_PX = 20
+# An area is "thin" (a rim or a line) when eroding it by 2 px leaves less than this share.
+THIN_CORE = 0.3
 
 
 @dataclass
@@ -213,7 +215,32 @@ def _change_areas(lab_a: np.ndarray, lab_b: np.ndarray, leftover: np.ndarray) ->
     for kind in _by_kind_of_change(lab_a, lab_b, leftover):
         n, labels = cv2.connectedComponents(cv2.dilate(kind.astype(np.uint8), disk), connectivity=8)
         areas += [a for a in (kind & (labels == i) for i in range(1, n)) if a.sum() >= min_px]
-    return areas
+    return _absorb_rims(areas)
+
+
+def _absorb_rims(areas: list[np.ndarray]) -> list[np.ndarray]:
+    """Fold thin areas into the area they hug.
+
+    A patch's soft edge is a mix of old and new colors, and mixing in RGB bends the shift in Lab,
+    so the edge can come out as its own kind of change: a thin ring around the patch. A thin area
+    that touches another one is that one's rim. A thin area on its own (a new line) stays.
+    """
+    if len(areas) < 2:
+        return areas
+    erode = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+    touch = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
+    out = list(areas)
+    for a in sorted(areas, key=lambda m: int(m.sum())):
+        core = cv2.erode(a.astype(np.uint8), erode).sum()
+        if core >= THIN_CORE * a.sum():
+            continue
+        near = cv2.dilate(a.astype(np.uint8), touch) > 0
+        contacts = [(int((near & b).sum()), i) for i, b in enumerate(out) if b is not a]
+        best, i = max(contacts, default=(0, -1))
+        if best:
+            out[i] = out[i] | a
+            out = [b for b in out if b is not a]
+    return out
 
 
 def analyze(lab_a: np.ndarray, lab_b: np.ndarray, change: np.ndarray, regions: list[Region]) -> list[ChangedRegion]:

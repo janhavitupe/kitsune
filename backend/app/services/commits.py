@@ -21,11 +21,13 @@ def create(
     origin: str = "upload",
     origin_meta: dict | None = None,
     require_head: int | None = None,
+    merge_parent_id: int | None = None,
 ) -> int:
     """Append a commit to a branch: parent = the branch head, then the head moves to it.
 
     require_head: refuse (HeadMoved) unless the branch head is still this commit. Used when the
     new image was built from that head, so it can't land on top of a newer version.
+    merge_parent_id: the second parent of a merge commit (the merged branch's head).
     """
     with transaction(conn):
         # Read the head inside the write lock so two writers can't share a parent.
@@ -34,9 +36,9 @@ def create(
             raise HeadMoved("The branch has a newer version; open the latest one and try again")
         seq = conn.execute("SELECT COALESCE(MAX(seq), 0) + 1 FROM commits WHERE repo_id = ?", (repo_id,)).fetchone()[0]
         commit_id = conn.execute(
-            "INSERT INTO commits (repo_id, seq, branch_id, parent_id, blob_sha, message, origin, origin_meta_json, created_at)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (repo_id, seq, branch_id, head, blob_sha, message, origin,
+            "INSERT INTO commits (repo_id, seq, branch_id, parent_id, merge_parent_id, blob_sha, message,"
+            " origin, origin_meta_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (repo_id, seq, branch_id, head, merge_parent_id, blob_sha, message, origin,
              json.dumps(origin_meta) if origin_meta else None, now()),
         ).lastrowid
         conn.execute("UPDATE branches SET head_commit_id = ? WHERE id = ?", (commit_id, branch_id))

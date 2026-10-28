@@ -66,6 +66,30 @@ class Region(BaseModel):
     polygons: list[list[list[float]]]
 
 
+class MergeChange(BaseModel):
+    label: str
+    bbox: list[float]
+    hints: list[str]
+
+
+class MergeConflict(MergeChange):
+    index: int
+    target_labels: list[str]  # what the target branch calls the area it changed there
+
+
+class MergePlan(BaseModel):
+    id: int
+    status: str  # open | resolved | aborted
+    source: str
+    target: str
+    source_head: int
+    target_head: int
+    base: int
+    fast_forward: bool  # the target hasn't changed since the source branched off
+    auto: list[MergeChange]  # changed on the source only: taken automatically
+    conflicts: list[MergeConflict]  # changed on both sides: the artist picks
+
+
 class Commit(BaseModel):
     id: int
     repo_id: int

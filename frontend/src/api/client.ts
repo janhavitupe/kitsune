@@ -69,6 +69,32 @@ export interface Diff {
   change_mask_url: string;
 }
 
+export interface MergeChange {
+  label: string;
+  bbox: [number, number, number, number];
+  hints: string[];
+}
+
+export interface MergeConflict extends MergeChange {
+  index: number;
+  target_labels: string[];
+}
+
+export interface MergePlan {
+  id: number;
+  status: "open" | "resolved" | "aborted";
+  source: string;
+  target: string;
+  source_head: number;
+  target_head: number;
+  base: number;
+  fast_forward: boolean;
+  auto: MergeChange[];
+  conflicts: MergeConflict[];
+}
+
+export type Side = "source" | "target";
+
 export class ApiError extends Error {
   constructor(
     public status: number,
@@ -114,6 +140,11 @@ export const api = {
     `${BASE}/api/commits/${target}/cherry-pick/preview?source=${source}&label=${encodeURIComponent(label)}`,
   cherryPick: (target: number, source: number, label: string) =>
     request<Commit>(`/api/commits/${target}/cherry-pick`, json({ source_commit: source, label, blend: "auto" })),
+  planMerge: (repoId: number, source: string, target: string) =>
+    request<MergePlan>(`/api/repos/${repoId}/merges`, json({ source, target })),
+  resolveMerge: (mergeId: number, choices: Record<number, Side>) =>
+    request<Commit>(`/api/merges/${mergeId}/resolve`, json({ choices, blend: "auto" })),
+  abortMerge: (mergeId: number) => request<MergePlan>(`/api/merges/${mergeId}/abort`, { method: "POST" }),
   uploadCommit: (repoId: number, file: File, branch: string, message: string) => {
     const form = new FormData();
     form.append("image", file);
