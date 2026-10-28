@@ -1,3 +1,6 @@
+import numpy as np
+from PIL import Image
+
 from app.services.diffing import summarize
 from app.services.pixel_diff import change_mask, to_array, to_lab
 from app.services.region_diff import analyze, position_label
@@ -43,9 +46,58 @@ def test_change_outside_regions_is_named_by_position():
     assert "lighter" in out[0].hints
 
 
+def test_touching_changes_of_different_kinds_stay_apart():
+    # Sky warmed and the coat repainted blue: they touch, but changed in very different ways.
+    out = run(scene(), scene(sky=SKY_DUSK, figure=(40, 70, 140)), regions=[])
+    assert sorted(r.label for r in out) == ["center area", "top area"]
+    hints = {r.label: r.hints for r in out}
+    assert "warmer" in hints["top area"] and "cooler" in hints["center area"]
+
+
+def gradient_sky(top, bottom, figure=None):
+    img = scene(figure=figure) if figure else scene()
+    px = np.asarray(img).copy()
+    t = np.linspace(0, 1, 240)[:, None, None]
+    sky = (np.array(top) + (np.array(bottom) - np.array(top)) * t).astype(np.uint8)
+    figure_cols = np.zeros(px.shape[1], bool)
+    figure_cols[FIGURE_BOX[0] : FIGURE_BOX[2] + 1] = True
+    rows = np.arange(240)
+    for x in range(px.shape[1]):
+        keep = rows < FIGURE_BOX[1] if figure_cols[x] else rows < 240
+        px[rows[keep], x] = sky[rows[keep], 0]
+    return Image.fromarray(px)
+
+
+def test_a_gradient_change_stays_one_area():
+    # Day sky → purple-to-orange dusk: the shift turns as you go down, but smoothly.
+    a = gradient_sky((90, 140, 210), (170, 200, 235))
+    b = gradient_sky((70, 60, 140), (240, 150, 90))
+    assert [r.label for r in run(a, b, [])] == ["top area"]
+
+
+def test_gradient_sky_and_repainted_coat_are_two_areas():
+    a = gradient_sky((90, 140, 210), (170, 200, 235))
+    b = gradient_sky((70, 60, 140), (240, 150, 90), figure=(40, 70, 140))
+    assert sorted(r.label for r in run(a, b, [])) == ["center area", "top area"]
+
+
+def test_kind_split_is_deterministic():
+    a, b = scene(), scene(sky=SKY_DUSK, figure=(40, 70, 140))
+    first, second = run(a, b, []), run(a, b, [])
+    assert all((x.mask == y.mask).all() for x, y in zip(first, second, strict=True))
+
+
 def test_whole_canvas_change():
+    # The same warm shift over every pixel is one change, not one per object.
+    a = scene()
+    b = Image.fromarray(np.clip(np.asarray(a).astype(int) + [40, 10, -40], 0, 255).astype(np.uint8))
+    out = run(a, b, regions=[])
+    assert [r.label for r in out] == ["whole canvas"]
+
+
+def test_different_changes_everywhere_are_listed_separately():
     out = run(scene(), scene(sky=SKY_DUSK, ground=(120, 90, 40), figure=(200, 120, 40)), regions=[])
-    assert out[0].label == "whole canvas"
+    assert sorted(r.label for r in out) == ["bottom area", "center area", "top area"]
 
 
 def test_position_label():

@@ -26,6 +26,15 @@ Regions: whole canvas (88%, cooler, more muted)
 Message: Shifted the whole palette cooler and more muted for a moonlit mood."""
 
 
+BLEND_SEAM_VERSION = 1
+
+BLEND_SEAM = (
+    "This is a crop of a digital painting where one area was brought back from an earlier version. "
+    "Blend the seam where the two painted areas meet so the transition looks painted, not pasted: "
+    "match brushwork, edges and lighting across it. Do not change anything else."
+)
+
+
 def describe_regions(regions: list[dict]) -> str:
     parts = [f"{r['label']} ({round(r['changed_ratio'] * 100)}%, {', '.join(r['hints'])})" for r in regions]
     return "; ".join(parts) or "no measurable change"

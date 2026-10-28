@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 
 from app.ai import spark
+from app.config import settings
 from app.services import diffing
 from app.services.segmentation import RawMask, save_regions
 from scenes import SKY_DUSK, scene, sky_mask
@@ -31,6 +32,15 @@ def test_diff_is_cached(client, repo, upload):
     first = client.get(f"/api/diff?from={v1['id']}&to={v2['id']}").json()
     second = client.get(f"/api/diff?from={v1['id']}&to={v2['id']}").json()
     assert first == second
+
+
+def test_diff_recomputed_when_thresholds_change(client, repo, upload, monkeypatch):
+    v1, v2 = two_versions(repo, upload)
+    url = f"/api/diff?from={v1['id']}&to={v2['id']}"
+    assert client.get(url).json()["regions"]
+    # A threshold so high nothing counts as changed: the cached diff must not be reused.
+    monkeypatch.setattr(settings, "diff_delta_e", 500.0)
+    assert client.get(url).json()["regions"] == []
 
 
 def test_upload_writes_auto_message(client, repo, upload):

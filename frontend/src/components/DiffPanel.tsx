@@ -10,6 +10,8 @@ interface Props {
   onMode: (m: OverlayMode) => void;
   focus: number | null;
   onFocus: (i: number | null) => void;
+  /** Set when the newer version is its branch's latest, so a region can be brought back from the older one. */
+  restoreFrom?: { seq: number; onRestore: (label: string) => void };
 }
 
 const MODES: [OverlayMode, string][] = [
@@ -25,7 +27,7 @@ function stat(r: ChangedRegion): string {
   return r.source === "change" ? `${pct(r.image_share)} of canvas` : `${pct(r.changed_ratio)} changed`;
 }
 
-export default function DiffPanel({ diff, error, message, mode, onMode, focus, onFocus }: Props) {
+export default function DiffPanel({ diff, error, message, mode, onMode, focus, onFocus, restoreFrom }: Props) {
   return (
     <aside className="space-y-4" aria-label="What changed">
       <div className="flex rounded-md border border-zinc-700 p-0.5 text-sm" role="radiogroup" aria-label="Overlay">
@@ -56,15 +58,18 @@ export default function DiffPanel({ diff, error, message, mode, onMode, focus, o
           {diff.regions.length > 0 && (
             <ul className="space-y-1" onMouseLeave={() => onFocus(null)}>
               {diff.regions.map((r, i) => (
-                <li key={`${r.label}-${i}`}>
+                <li
+                  key={`${r.label}-${i}`}
+                  onMouseEnter={() => onFocus(i)}
+                  className={cx(
+                    "rounded-md border transition-colors",
+                    focus === i ? "border-orange-500 bg-orange-500/10" : "border-zinc-800 hover:border-zinc-600",
+                  )}
+                >
                   <button
-                    onMouseEnter={() => onFocus(i)}
                     onFocus={() => onFocus(i)}
                     onClick={() => onFocus(focus === i ? null : i)}
-                    className={cx(
-                      "w-full rounded-md border px-3 py-2 text-left transition-colors",
-                      focus === i ? "border-orange-500 bg-orange-500/10" : "border-zinc-800 hover:border-zinc-600",
-                    )}
+                    className="w-full px-3 pt-2 pb-1 text-left"
                   >
                     <span className="flex items-baseline justify-between gap-2">
                       <span className="font-medium first-letter:uppercase">{r.label}</span>
@@ -78,6 +83,16 @@ export default function DiffPanel({ diff, error, message, mode, onMode, focus, o
                       ))}
                     </span>
                   </button>
+                  <div className="px-3 pb-2">
+                    {restoreFrom && (
+                      <button
+                        onClick={() => restoreFrom.onRestore(r.label)}
+                        className="text-xs text-orange-400 hover:text-orange-300 hover:underline"
+                      >
+                        Bring back from v{restoreFrom.seq}
+                      </button>
+                    )}
+                  </div>
                 </li>
               ))}
             </ul>

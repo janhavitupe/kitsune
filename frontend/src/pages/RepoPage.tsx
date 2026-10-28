@@ -73,6 +73,12 @@ export default function RepoPage({ repoId, onBack }: Props) {
     setSelected([c.id]);
   };
 
+  // Show what the cherry-pick did: the version it went into against the new one.
+  const onCherryPicked = async (c: Commit) => {
+    await refresh();
+    if (c.parent_id) setSelected([c.parent_id, c.id]);
+  };
+
   const onBranchCreated = async (name: string) => {
     await refresh();
     setBranch(name);
@@ -153,7 +159,13 @@ export default function RepoPage({ repoId, onBack }: Props) {
 
       <main className="flex-1 p-4">
         {a && b ? (
-          <CompareView a={a} b={b} onClose={() => setSelected([b.id])} />
+          <CompareView
+            a={a}
+            b={b}
+            bIsHead={repo.branches.some((br) => br.head_commit_id === b.id)}
+            onClose={() => setSelected([b.id])}
+            onCommitted={onCherryPicked}
+          />
         ) : a ? (
           <CommitDetail
             commit={a}

@@ -3,9 +3,10 @@ import sqlite3
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
 
 from app import jobs, storage
-from app.db import get_db, now, transaction
+from app.db import get_db
 from app.routers.common import COMMIT_SELECT, get_commit_or_404, get_repo_or_404, to_commit
 from app.schemas import Commit
+from app.services import commits
 
 router = APIRouter(tags=["commits"])
 
@@ -31,24 +32,13 @@ def create_commit(
     except storage.ImageRejected as e:
         raise HTTPException(e.status_code, str(e)) from e
 
-    message = (message or "").strip() or None
-    with transaction(conn):
-        # Re-read the head inside the write lock so two uploads can't share a parent.
-        head = conn.execute(
-            "SELECT head_commit_id FROM branches WHERE id = ?", (branch_row["id"],)
-        ).fetchone()["head_commit_id"]
-        seq = conn.execute(
-            "SELECT COALESCE(MAX(seq), 0) + 1 FROM commits WHERE repo_id = ?", (repo_id,)
-        ).fetchone()[0]
-        commit_id = conn.execute(
-            "INSERT INTO commits (repo_id, seq, branch_id, parent_id, blob_sha, message, created_at)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (repo_id, seq, branch_row["id"], head, blob["sha256"], message, now()),
-        ).lastrowid
-        conn.execute(
-            "UPDATE branches SET head_commit_id = ? WHERE id = ?", (commit_id, branch_row["id"])
-        )
-
+    commit_id = commits.create(
+        conn,
+        repo_id=repo_id,
+        branch_id=branch_row["id"],
+        blob_sha=blob["sha256"],
+        message=(message or "").strip() or None,
+    )
     background.add_task(jobs.run_analysis, commit_id)
     return get_commit_or_404(conn, commit_id)
 

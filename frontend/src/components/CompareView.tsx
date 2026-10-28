@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, type Commit, type Diff } from "../api/client";
 import { commitTitle, cx } from "../lib/format";
+import CherryPickDialog from "./CherryPickDialog";
 import CompareSlider from "./CompareSlider";
 import DiffPanel from "./DiffPanel";
 import RegionOverlay, { type OverlayMode } from "./RegionOverlay";
@@ -8,13 +9,21 @@ import SideBySide from "./SideBySide";
 
 type Mode = "slider" | "side";
 
-/** a is the older version, b the newer one. */
-export default function CompareView({ a, b, onClose }: { a: Commit; b: Commit; onClose: () => void }) {
+interface Props {
+  a: Commit; // the older version
+  b: Commit; // the newer version
+  bIsHead: boolean; // b is its branch's latest version, so regions can be brought back into it
+  onClose: () => void;
+  onCommitted: (c: Commit) => void;
+}
+
+export default function CompareView({ a, b, bIsHead, onClose, onCommitted }: Props) {
   const [mode, setMode] = useState<Mode>("slider");
   const [overlay, setOverlay] = useState<OverlayMode>("regions");
   const [diff, setDiff] = useState<Diff | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [focus, setFocus] = useState<number | null>(null);
+  const [picking, setPicking] = useState<string | null>(null);
 
   useEffect(() => {
     let live = true;
@@ -73,8 +82,22 @@ export default function CompareView({ a, b, onClose }: { a: Commit; b: Commit; o
           onMode={setOverlay}
           focus={focus}
           onFocus={setFocus}
+          restoreFrom={bIsHead ? { seq: a.seq, onRestore: setPicking } : undefined}
         />
       </div>
+
+      {picking && (
+        <CherryPickDialog
+          source={a}
+          target={b}
+          label={picking}
+          onClose={() => setPicking(null)}
+          onDone={(c) => {
+            setPicking(null);
+            onCommitted(c);
+          }}
+        />
+      )}
     </div>
   );
 }

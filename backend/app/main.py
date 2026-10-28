@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app import db
 from app.config import settings
-from app.routers import blobs, branches, commits, diffs, repos
+from app.routers import blobs, branches, cherrypick, commits, diffs, repos
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
@@ -25,7 +25,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-for module in (repos, branches, commits, blobs, diffs):
+for module in (repos, branches, commits, blobs, diffs, cherrypick):
     app.include_router(module.router, prefix="/api")
 
 

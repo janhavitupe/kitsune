@@ -110,6 +110,10 @@ export const api = {
   createBranch: (repoId: number, name: string, fromCommit: number | null) =>
     request<Branch>(`/api/repos/${repoId}/branches`, json({ name, from_commit: fromCommit })),
   getDiff: (from: number, to: number) => request<Diff>(`/api/diff?from=${from}&to=${to}`),
+  cherryPickPreviewUrl: (target: number, source: number, label: string) =>
+    `${BASE}/api/commits/${target}/cherry-pick/preview?source=${source}&label=${encodeURIComponent(label)}`,
+  cherryPick: (target: number, source: number, label: string) =>
+    request<Commit>(`/api/commits/${target}/cherry-pick`, json({ source_commit: source, label, blend: "auto" })),
   uploadCommit: (repoId: number, file: File, branch: string, message: string) => {
     const form = new FormData();
     form.append("image", file);

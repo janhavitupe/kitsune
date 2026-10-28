@@ -8,6 +8,7 @@ import io
 import json
 import logging
 import sqlite3
+from dataclasses import dataclass
 
 import numpy as np
 from PIL import Image
@@ -20,6 +21,13 @@ from app.services import pixel_diff, region_diff, segmentation
 log = logging.getLogger("kitsune.diff")
 
 OVERLAY_RGBA = (249, 115, 22, 150)  # orange, matches the UI accent
+DIFF_VERSION = 3  # bump when the diff algorithm changes, so cached diffs are recomputed
+
+
+def _version() -> str:
+    """The algorithm version plus every tunable it depends on: changing a threshold invalidates the cache."""
+    s = settings
+    return f"{DIFF_VERSION}:{s.diff_analysis_px}:{s.diff_delta_e}:{s.diff_min_component}:{s.diff_min_region_change}"
 
 
 class DiffError(ValueError):
@@ -55,28 +63,49 @@ def _save_overlay(rel: str, change: np.ndarray) -> None:
     path.write_bytes(out.getvalue())
 
 
-def compute(conn: sqlite3.Connection, from_id: int, to_id: int) -> dict:
+@dataclass
+class Analysis:
+    regions: list[region_diff.ChangedRegion]  # with masks at `size`
+    change: np.ndarray
+    size: tuple[int, int]  # (width, height) of the analysis copy of B
+    resized: bool
+    segmented: bool
+
+
+def analyze(conn: sqlite3.Connection, from_id: int, to_id: int) -> Analysis:
+    """Run the diff A→B without touching the cache. Deterministic, so masks match the cached diff."""
     a, b = _commit(conn, from_id), _commit(conn, to_id)
     blob_a, blob_b = storage.get_blob(conn, a["blob_sha"]), storage.get_blob(conn, b["blob_sha"])
-    resized = (blob_a["width"], blob_a["height"]) != (blob_b["width"], blob_b["height"])
     img_b = storage.load_rgb(conn, b["blob_sha"], settings.diff_analysis_px)
     img_a = storage.load_rgb(conn, a["blob_sha"])
-    size = img_b.size  # (width, height); A is resized onto B's canvas
+    size = img_b.size  # A is resized onto B's canvas
 
     lab_a = pixel_diff.to_lab(pixel_diff.to_array(img_a, size))
     lab_b = pixel_diff.to_lab(pixel_diff.to_array(img_b))
     change = pixel_diff.change_mask(lab_a, lab_b)
     regions = segmentation.load_regions(conn, b["blob_sha"], size)
-    changed = [r.to_dict() for r in region_diff.analyze(lab_a, lab_b, change, regions)]
+    return Analysis(
+        regions=region_diff.analyze(lab_a, lab_b, change, regions),
+        change=change,
+        size=size,
+        resized=(blob_a["width"], blob_a["height"]) != (blob_b["width"], blob_b["height"]),
+        segmented=bool(regions),
+    )
+
+
+def compute(conn: sqlite3.Connection, from_id: int, to_id: int) -> dict:
+    result = analyze(conn, from_id, to_id)
+    changed = [r.to_dict() for r in result.regions]
 
     rel = f"diffs/{from_id}_{to_id}.png"
-    _save_overlay(rel, change)
+    _save_overlay(rel, result.change)
     payload = {
         "regions": changed,
-        "changed_fraction": round(float(change.mean()), 4),
-        "resized": resized,
-        "segmented": bool(regions),
-        "size": list(size),
+        "changed_fraction": round(float(result.change.mean()), 4),
+        "resized": result.resized,
+        "segmented": result.segmented,
+        "size": list(result.size),
+        "version": _version(),
     }
     summary = summarize(changed)
     conn.execute(
@@ -99,14 +128,19 @@ def get_cached(conn: sqlite3.Connection, from_id: int, to_id: int) -> dict | Non
 
 
 def get_or_compute(conn: sqlite3.Connection, from_id: int, to_id: int) -> dict:
-    """The diff A→B, computed once. Recomputed if B gained SAM regions since it was cached."""
+    """The diff A→B, computed once. Recomputed if B gained SAM regions since it was cached, or if the
+    algorithm or its thresholds changed."""
     if from_id == to_id:
         raise DiffError("Pick two different versions")
     a, b = _commit(conn, from_id), _commit(conn, to_id)
     if a["repo_id"] != b["repo_id"]:
         raise DiffError("Versions are from different pieces")
     hit = get_cached(conn, from_id, to_id)
-    if hit and (hit["segmented"] or not segmentation.has_regions(conn, b["blob_sha"])):
+    if (
+        hit
+        and hit.get("version") == _version()
+        and (hit["segmented"] or not segmentation.has_regions(conn, b["blob_sha"]))
+    ):
         return hit
     return compute(conn, from_id, to_id)
 
