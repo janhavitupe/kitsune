@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 BRANCH_NAME_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,63}$"
@@ -19,6 +21,35 @@ class Branch(BaseModel):
 class BranchCreate(BaseModel):
     name: str = Field(pattern=BRANCH_NAME_PATTERN)
     from_commit: int | None = None  # defaults to the head of main
+
+
+class BranchUpdate(BaseModel):
+    name: str | None = Field(default=None, pattern=BRANCH_NAME_PATTERN)
+    kind: Literal["normal", "explore", "discarded"] | None = None
+
+
+class Note(BaseModel):
+    id: int
+    commit_id: int
+    kind: str  # artist | client
+    transcript: str | None  # typed text, or the transcription of the recording (None until transcribed)
+    summary: str | None
+    audio_url: str | None
+    created_at: str
+
+
+class SearchResult(BaseModel):
+    commit_id: int
+    seq: int
+    snippet: str  # the matching text with [brackets] around the hits
+    reason: str
+
+
+class SearchResponse(BaseModel):
+    query: str
+    relation: str | None  # before | after | when, for queries about a moment in the history
+    parser: str  # spark | rules
+    results: list[SearchResult]
 
 
 class Repo(BaseModel):
@@ -106,6 +137,7 @@ class Commit(BaseModel):
     origin: str
     origin_meta: dict | None
     analysis_status: str
+    note_count: int
     created_at: str
     image_url: str
     thumb_url: str

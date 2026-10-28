@@ -1,6 +1,7 @@
 import { assetUrl, type Branch, type Commit } from "../api/client";
 import { commitTitle, cx } from "../lib/format";
 import StatusBadge from "./StatusBadge";
+import { MicIcon } from "./VoiceRecorder";
 
 const COL = 136; // horizontal distance between commits
 const ROW = 124; // vertical distance between branch lanes
@@ -15,6 +16,7 @@ interface Props {
   branches: Branch[];
   commits: Commit[]; // oldest first
   selected: number[];
+  highlighted?: number[]; // search hits
   currentBranchHead: number | null;
   onSelect: (id: number, additive: boolean) => void;
 }
@@ -23,8 +25,9 @@ interface Props {
  * Commits in time order (x) on one lane per branch (y), with parent links drawn as curves.
  * Merge links are dashed. Lanes follow branch creation order, so main is always on top.
  */
-export default function Timeline({ branches, commits, selected, currentBranchHead, onSelect }: Props) {
+export default function Timeline({ branches, commits, selected, highlighted = [], currentBranchHead, onSelect }: Props) {
   const lane = new Map(branches.map((b, i) => [b.id, i]));
+  const kindOf = new Map(branches.map((b) => [b.id, b.kind]));
   const pos = new Map(
     commits.map((c, i) => [c.id, { x: GUTTER + i * COL, y: PAD + (lane.get(c.branch_id) ?? 0) * ROW }]),
   );
@@ -81,7 +84,7 @@ export default function Timeline({ branches, commits, selected, currentBranchHea
         {branches.map((b, i) => (
           <div
             key={b.id}
-            className="absolute left-3 truncate text-xs text-zinc-400"
+            className={cx("absolute left-3 truncate text-xs", b.kind === "explore" ? "text-zinc-500 italic" : "text-zinc-400")}
             style={{ top: PAD + i * ROW + THUMB_H / 2 - 8, width: GUTTER - 24 }}
             title={b.name}
           >
@@ -92,13 +95,20 @@ export default function Timeline({ branches, commits, selected, currentBranchHea
         {commits.map((c) => {
           const p = pos.get(c.id)!;
           const slot = selected.indexOf(c.id);
+          const exploring = kindOf.get(c.branch_id) === "explore";
           return (
             <button
               key={c.id}
               onClick={(e) => onSelect(c.id, e.shiftKey || e.metaKey || e.ctrlKey)}
               className={cx(
                 "absolute flex flex-col overflow-hidden rounded-md border bg-zinc-900 text-left transition-colors",
-                slot >= 0 ? "border-orange-500 ring-2 ring-orange-500/40" : "border-zinc-700 hover:border-zinc-500",
+                slot >= 0
+                  ? "border-orange-500 ring-2 ring-orange-500/40"
+                  : highlighted.includes(c.id)
+                    ? "border-sky-400 ring-2 ring-sky-400/40"
+                    : exploring
+                      ? "border-dashed border-zinc-700 opacity-75 hover:border-zinc-500 hover:opacity-100"
+                      : "border-zinc-700 hover:border-zinc-500",
               )}
               style={{ left: p.x, top: p.y, width: CARD_W, height: CARD_H }}
               title={commitTitle(c)}
@@ -116,6 +126,12 @@ export default function Timeline({ branches, commits, selected, currentBranchHea
                 <span className="font-medium">v{c.seq}</span>
                 {c.id === currentBranchHead && (
                   <span className="rounded bg-orange-600/30 px-1 text-[10px] text-orange-300">HEAD</span>
+                )}
+                {c.note_count > 0 && (
+                  <span className="flex items-center gap-0.5 text-[10px] text-zinc-400" title={`${c.note_count} note(s)`}>
+                    <MicIcon className="size-3" />
+                    {c.note_count > 1 && c.note_count}
+                  </span>
                 )}
                 {slot >= 0 && <span className="ml-auto font-semibold text-orange-400">{slot === 0 ? "A" : "B"}</span>}
               </span>

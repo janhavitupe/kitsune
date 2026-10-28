@@ -48,8 +48,26 @@ def blend_seam(conn: sqlite3.Connection, crop: np.ndarray, band: np.ndarray) -> 
         )
         return {"png_b64": r.data[0].b64_json}
 
-    out = Image.open(io.BytesIO(base64.b64decode(cached(conn, settings.image_model, inputs, call)["png_b64"])))
-    out = out.convert("RGB")
-    if out.size != (crop.shape[1], crop.shape[0]):
-        out = out.resize((crop.shape[1], crop.shape[0]), Image.Resampling.LANCZOS)
+    return _decode(cached(conn, settings.image_model, inputs, call)["png_b64"], crop.shape)
+
+
+def _decode(png_b64: str, shape: tuple[int, ...]) -> np.ndarray:
+    out = Image.open(io.BytesIO(base64.b64decode(png_b64))).convert("RGB")
+    if out.size != (shape[1], shape[0]):
+        out = out.resize((shape[1], shape[0]), Image.Resampling.LANCZOS)
     return np.asarray(out)
+
+
+def recolor(conn: sqlite3.Connection, img: np.ndarray, sha: str, direction: str) -> np.ndarray:
+    """Muse Image's take on `img` (the blob `sha`) in another palette, same size as the input."""
+    inputs = {"task": "recolor", "v": prompts.EXPLORE_VERSION, "blob": sha, "direction": direction}
+
+    def call() -> dict:
+        r = model_api().images.edit(
+            model=settings.image_model,
+            image=("art.png", _png(Image.fromarray(img)), "image/png"),
+            prompt=prompts.EXPLORE_EDIT.format(direction=direction),
+        )
+        return {"png_b64": r.data[0].b64_json}
+
+    return _decode(cached(conn, settings.image_model, inputs, call)["png_b64"], img.shape)

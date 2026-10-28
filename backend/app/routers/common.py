@@ -6,7 +6,8 @@ from fastapi import HTTPException
 from app.schemas import Branch, Commit
 
 COMMIT_SELECT = """
-SELECT c.*, b.name AS branch, bl.width, bl.height
+SELECT c.*, b.name AS branch, bl.width, bl.height,
+  (SELECT COUNT(*) FROM voice_notes v WHERE v.commit_id = c.id) AS note_count
 FROM commits c
 JOIN branches b ON b.id = c.branch_id
 JOIN blobs bl ON bl.sha256 = c.blob_sha

@@ -94,7 +94,9 @@ def test_spark_message_used_when_available(client, conn, repo, upload, monkeypat
     v2 = upload(repo["id"], scene(sky=SKY_DUSK))
 
     assert client.get(f"/api/commits/{v2['id']}").json()["auto_message"] == "Warmed the sky into a dusk palette."
-    (call,) = fake.calls
+    # Spark also captions each version; the commit-message call is the one with the system prompt.
+    message_calls = lambda: [c for c in fake.calls if c["messages"][0]["role"] == "system"]  # noqa: E731
+    (call,) = message_calls()
     prompt = call["messages"][-1]["content"][-1]["text"]
     assert "whole canvas" in prompt or "area" in prompt  # measured regions are in the prompt
     assert sum(1 for part in call["messages"][-1]["content"] if part["type"] == "image_url") == 2
@@ -102,7 +104,7 @@ def test_spark_message_used_when_available(client, conn, repo, upload, monkeypat
     # Same inputs again: served from the AI cache, no second call.
     diff = diffing.get_or_compute(conn, v1["id"], v2["id"])
     diffing.commit_message(conn, diff, v1["blob_sha"], v2["blob_sha"])
-    assert len(fake.calls) == 1
+    assert len(message_calls()) == 1
 
 
 def test_spark_failure_falls_back_to_summary(client, repo, upload, monkeypatch):

@@ -39,6 +39,7 @@ export interface Commit {
   origin: string;
   origin_meta: Record<string, unknown> | null;
   analysis_status: AnalysisStatus;
+  note_count: number;
   created_at: string;
   image_url: string;
   thumb_url: string;
@@ -95,6 +96,32 @@ export interface MergePlan {
 
 export type Side = "source" | "target";
 
+export type NoteKind = "artist" | "client";
+
+export interface Note {
+  id: number;
+  commit_id: number;
+  kind: NoteKind;
+  transcript: string | null;
+  summary: string | null;
+  audio_url: string | null;
+  created_at: string;
+}
+
+export interface SearchResult {
+  commit_id: number;
+  seq: number;
+  snippet: string;
+  reason: string;
+}
+
+export interface SearchResponse {
+  query: string;
+  relation: string | null;
+  parser: string;
+  results: SearchResult[];
+}
+
 export class ApiError extends Error {
   constructor(
     public status: number,
@@ -145,6 +172,25 @@ export const api = {
   resolveMerge: (mergeId: number, choices: Record<number, Side>) =>
     request<Commit>(`/api/merges/${mergeId}/resolve`, json({ choices, blend: "auto" })),
   abortMerge: (mergeId: number) => request<MergePlan>(`/api/merges/${mergeId}/abort`, { method: "POST" }),
+  updateBranch: (branchId: number, patch: { name?: string; kind?: string }) =>
+    request<Branch>(`/api/branches/${branchId}`, { ...json(patch), method: "PATCH" }),
+  listNotes: (commitId: number) => request<Note[]>(`/api/commits/${commitId}/notes`),
+  addNote: (commitId: number, kind: NoteKind, text: string, audio: Blob | null, audioName = "note.webm") => {
+    const form = new FormData();
+    form.append("kind", kind);
+    if (text.trim()) form.append("text", text.trim());
+    if (audio) form.append("audio", audio, audioName);
+    return request<Note>(`/api/commits/${commitId}/notes`, { method: "POST", body: form });
+  },
+  transcribeNote: (noteId: number) => request<Note>(`/api/notes/${noteId}/transcribe`, { method: "POST" }),
+  deleteNote: async (noteId: number) => {
+    const res = await fetch(`${BASE}/api/notes/${noteId}`, { method: "DELETE" });
+    if (!res.ok) throw new ApiError(res.status, res.statusText);
+  },
+  search: (repoId: number, q: string) =>
+    request<SearchResponse>(`/api/repos/${repoId}/search?q=${encodeURIComponent(q)}`),
+  explore: (commitId: number, prompt: string) =>
+    request<Commit[]>(`/api/commits/${commitId}/explore`, json({ prompt: prompt.trim() || null, mode: "auto" })),
   uploadCommit: (repoId: number, file: File, branch: string, message: string) => {
     const form = new FormData();
     form.append("image", file);

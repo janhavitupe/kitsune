@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { api, assetUrl, type Branch, type Commit } from "../api/client";
 import { commitTitle, timeAgo } from "../lib/format";
+import NotesPanel from "./NotesPanel";
 import StatusBadge from "./StatusBadge";
 
 interface Props {
@@ -10,9 +11,13 @@ interface Props {
   onCompareWithParent: () => void;
   onPickSecond: () => void;
   onBranchCreated: (name: string) => void;
+  onExplore: () => void;
+  onNotesChanged: () => void;
 }
 
-export default function CommitDetail({ commit, parent, branches, onCompareWithParent, onPickSecond, onBranchCreated }: Props) {
+export default function CommitDetail({
+  commit, parent, branches, onCompareWithParent, onPickSecond, onBranchCreated, onExplore, onNotesChanged,
+}: Props) {
   const [branching, setBranching] = useState(false);
   const [name, setName] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -88,8 +93,13 @@ export default function CommitDetail({ commit, parent, branches, onCompareWithPa
               Branch from here
             </button>
           )}
+          <button onClick={onExplore} className="rounded-md border border-zinc-700 px-3 py-2 text-left text-sm hover:bg-zinc-900">
+            Explore palettes…
+          </button>
           {error && <p className="text-sm text-red-400">{error}</p>}
         </div>
+
+        <NotesPanel commitId={commit.id} onChanged={onNotesChanged} />
       </aside>
     </div>
   );

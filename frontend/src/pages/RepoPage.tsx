@@ -2,7 +2,9 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, type Commit, type RepoDetail } from "../api/client";
 import CommitDetail from "../components/CommitDetail";
 import CompareView from "../components/CompareView";
+import ExploreDialog from "../components/ExploreDialog";
 import MergeDialog from "../components/MergeDialog";
+import SearchBar from "../components/SearchBar";
 import Timeline from "../components/Timeline";
 import UploadDialog from "../components/UploadDialog";
 
@@ -25,6 +27,8 @@ export default function RepoPage({ repoId, onBack }: Props) {
   const [pickingSecond, setPickingSecond] = useState(false);
   const [uploadOpen, setUploadOpen] = useState(false);
   const [mergeOpen, setMergeOpen] = useState(false);
+  const [exploring, setExploring] = useState<Commit | null>(null);
+  const [found, setFound] = useState<number[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
@@ -107,7 +111,11 @@ export default function RepoPage({ repoId, onBack }: Props) {
   if (!repo) return <main className="p-6 text-zinc-500">Loading…</main>;
 
   const [a, b] = [...picked].sort((x, y) => x.seq - y.seq);
-  const heads = new Map(repo.branches.map((br) => [br.name, br.head_commit_id]));
+  // Discarded explore branches are hidden, not deleted (history is append-only).
+  const branches = repo.branches.filter((br) => br.kind !== "discarded");
+  const shown = new Set(branches.map((br) => br.id));
+  const visible = commits.filter((c) => shown.has(c.branch_id));
+  const heads = new Map(branches.map((br) => [br.name, br.head_commit_id]));
 
   return (
     <div className="flex min-h-screen flex-col">
@@ -127,13 +135,13 @@ export default function RepoPage({ repoId, onBack }: Props) {
             onChange={(e) => setBranch(e.target.value)}
             className="rounded-md border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-sm"
           >
-            {repo.branches.map((br) => (
+            {branches.map((br) => (
               <option key={br.id} value={br.name}>
                 {br.name}
               </option>
             ))}
           </select>
-          {repo.branches.filter((br) => br.head_commit_id !== null).length > 1 && (
+          {branches.filter((br) => br.head_commit_id !== null).length > 1 && (
             <button onClick={() => setMergeOpen(true)} className="rounded-md border border-zinc-700 px-3 py-1.5 text-sm hover:bg-zinc-900">
               Merge…
             </button>
@@ -156,10 +164,12 @@ export default function RepoPage({ repoId, onBack }: Props) {
           </div>
         ) : (
           <>
+            <SearchBar repoId={repo.id} onResults={setFound} onPick={(id) => setSelected([id])} />
             <Timeline
-              branches={repo.branches}
-              commits={commits}
+              branches={branches}
+              commits={visible}
               selected={selected}
+              highlighted={found}
               currentBranchHead={heads.get(branch) ?? null}
               onSelect={select}
             />
@@ -189,16 +199,22 @@ export default function RepoPage({ repoId, onBack }: Props) {
             onCompareWithParent={() => a.parent_id && setSelected([a.parent_id, a.id])}
             onPickSecond={() => setPickingSecond(true)}
             onBranchCreated={onBranchCreated}
+            onExplore={() => setExploring(a)}
+            onNotesChanged={refresh}
           />
         ) : null}
       </main>
 
+      {exploring && (
+        <ExploreDialog commit={exploring} branches={repo.branches} onClose={() => setExploring(null)} onChanged={refresh} />
+      )}
+
       {mergeOpen && (
         <MergeDialog
           repoId={repo.id}
-          branches={repo.branches}
+          branches={branches}
           commitsById={byId}
-          defaultSource={branch !== "main" ? branch : (repo.branches.find((br) => br.name !== "main")?.name ?? "main")}
+          defaultSource={branch !== "main" ? branch : (branches.find((br) => br.name !== "main")?.name ?? "main")}
           onClose={() => setMergeOpen(false)}
           onMerged={onMerged}
         />
