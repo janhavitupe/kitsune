@@ -1,0 +1,40 @@
+# Planning and milestone docs (local only, never committed)
+planning/
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Local data: blobs, masks, thumbnails, SQLite, AI cache, raw API probe output
+data/
+scripts/probe_out/
+*.db
+*.sqlite
+*.sqlite3
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+
+# Node / front end
+node_modules/
+dist/
+.vite/
+*.local
+
+# Deploy tooling
+.vercel/
+.modal/
+
+# OS and editors
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
