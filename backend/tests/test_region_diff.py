@@ -1,11 +1,11 @@
 import numpy as np
 from PIL import Image, ImageDraw
+from scenes import FIGURE_BOX, SKY_DUSK, box_mask, figure_mask, scene, sky_mask
 
 from app.services.diffing import summarize
 from app.services.pixel_diff import change_mask, to_array, to_lab
 from app.services.region_diff import analyze, position_label
 from app.services.segmentation import Region
-from scenes import FIGURE_BOX, SKY_DUSK, box_mask, figure_mask, scene, sky_mask
 
 
 def run(a, b, regions):

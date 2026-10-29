@@ -3,7 +3,6 @@ from pathlib import Path
 
 import pytest
 from PIL import ImageDraw
-
 from scenes import SKY_DUSK, scene
 
 SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "seed_demo.py"

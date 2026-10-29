@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { api, type Repo } from "../api/client";
+import { FoxMark, Skeleton } from "../components/Logo";
 import { timeAgo } from "../lib/format";
 
 export default function RepoPicker({ onOpen }: { onOpen: (id: number) => void }) {
@@ -7,9 +8,11 @@ export default function RepoPicker({ onOpen }: { onOpen: (id: number) => void })
   const [name, setName] = useState("");
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
+  const load = () => {
+    setError(null);
     api.listRepos().then(setRepos, (e: Error) => setError(e.message));
-  }, []);
+  };
+  useEffect(load, []);
 
   const create = async (e: FormEvent) => {
     e.preventDefault();
@@ -24,8 +27,8 @@ export default function RepoPicker({ onOpen }: { onOpen: (id: number) => void })
 
   return (
     <main className="mx-auto max-w-xl px-4 py-12">
-      <h1 className="text-3xl font-semibold">
-        <span aria-hidden>🦊</span> Kitsune
+      <h1 className="flex items-center gap-2 text-3xl font-semibold">
+        <FoxMark className="size-9" /> Kitsune
       </h1>
       <p className="mt-1 text-zinc-400">Version control for digital artists.</p>
 
@@ -42,12 +45,27 @@ export default function RepoPicker({ onOpen }: { onOpen: (id: number) => void })
         </button>
       </form>
 
-      {error && <p className="mt-4 text-sm text-red-400">{error}</p>}
+      {error && (
+        <p className="mt-4 text-sm text-red-400">
+          {error}{" "}
+          {repos === null && (
+            <button type="button" onClick={load} className="text-orange-400 hover:underline">
+              Try again
+            </button>
+          )}
+        </p>
+      )}
 
       <h2 className="mt-10 text-sm font-medium uppercase tracking-wide text-zinc-500">Your pieces</h2>
-      {repos === null && !error && <p className="mt-3 text-zinc-500">Loading…</p>}
+      {repos === null && !error && (
+        <div className="mt-3 space-y-2" aria-label="Loading pieces">
+          {[0, 1, 2].map((i) => (
+            <Skeleton key={i} className="h-12" />
+          ))}
+        </div>
+      )}
       {repos?.length === 0 && <p className="mt-3 text-zinc-500">Nothing yet. Create your first piece above.</p>}
-      <ul className="mt-3 divide-y divide-zinc-800 rounded-md border border-zinc-800">
+      <ul className={repos?.length ? "mt-3 divide-y divide-zinc-800 rounded-md border border-zinc-800" : "hidden"}>
         {repos?.map((r) => (
           <li key={r.id}>
             <button onClick={() => onOpen(r.id)} className="flex w-full items-center justify-between px-4 py-3 text-left hover:bg-zinc-900">

@@ -147,8 +147,26 @@ export class ApiError extends Error {
 /** Backend-relative URLs (image_url, thumb_url) need the API origin in production. */
 export const assetUrl = (path: string) => BASE + path;
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(BASE + path, init);
+/** What to tell the artist for failures that aren't about their input. Null keeps the server's message. */
+function friendly(status: number, retryAfter: string | null): string | null {
+  if (status === 429) {
+    const s = Number(retryAfter);
+    return `That's a lot of requests at once. Try again in ${s > 0 ? `${s} seconds` : "a moment"}.`;
+  }
+  if (status === 502 || status === 503) return "The server is waking up or busy. Try again in a few seconds.";
+  if (status === 504) return "Analysis is taking longer than usual. Try again in a moment.";
+  if (status >= 500) return "Something went wrong on the server. Try again, and if it keeps happening, reload the page.";
+  return null;
+}
+
+/** fetch, but a dropped connection becomes an ApiError with a readable message instead of "Failed to fetch". */
+async function send(path: string, init?: RequestInit): Promise<Response> {
+  let res: Response;
+  try {
+    res = await fetch(BASE + path, init);
+  } catch {
+    throw new ApiError(0, "Can't reach the Kitsune server. Check your connection and try again.");
+  }
   if (!res.ok) {
     let detail = res.statusText;
     try {
@@ -157,9 +175,13 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     } catch {
       // keep statusText
     }
-    throw new ApiError(res.status, detail);
+    throw new ApiError(res.status, friendly(res.status, res.headers.get("Retry-After")) ?? detail);
   }
-  return res.json() as Promise<T>;
+  return res;
+}
+
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  return (await send(path, init)).json() as Promise<T>;
 }
 
 const json = (body: unknown): RequestInit => ({
@@ -177,8 +199,8 @@ export const api = {
   story: (repoId: number) => request<Story>(`/api/repos/${repoId}/story`, { method: "POST" }),
   /** Run the studio assistant, calling onEvent for each server-sent event as it arrives. */
   runAssistant: async (repoId: number, ask: string, onEvent: (e: AssistantEvent) => void, startCommit?: number) => {
-    const res = await fetch(`${BASE}/api/repos/${repoId}/assistant`, json({ ask, start_commit: startCommit ?? null }));
-    if (!res.ok || !res.body) throw new ApiError(res.status, res.statusText);
+    const res = await send(`/api/repos/${repoId}/assistant`, json({ ask, start_commit: startCommit ?? null }));
+    if (!res.body) throw new ApiError(res.status, "The assistant didn't send a response. Try again.");
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
@@ -195,6 +217,7 @@ export const api = {
     }
   },
   listCommits: (repoId: number) => request<Commit[]>(`/api/repos/${repoId}/commits`),
+  retryAnalysis: (commitId: number) => request<Commit>(`/api/commits/${commitId}/analyze`, { method: "POST" }),
   createBranch: (repoId: number, name: string, fromCommit: number | null) =>
     request<Branch>(`/api/repos/${repoId}/branches`, json({ name, from_commit: fromCommit })),
   getDiff: (from: number, to: number) => request<Diff>(`/api/diff?from=${from}&to=${to}`),
@@ -219,8 +242,7 @@ export const api = {
   },
   transcribeNote: (noteId: number) => request<Note>(`/api/notes/${noteId}/transcribe`, { method: "POST" }),
   deleteNote: async (noteId: number) => {
-    const res = await fetch(`${BASE}/api/notes/${noteId}`, { method: "DELETE" });
-    if (!res.ok) throw new ApiError(res.status, res.statusText);
+    await send(`/api/notes/${noteId}`, { method: "DELETE" });
   },
   search: (repoId: number, q: string) =>
     request<SearchResponse>(`/api/repos/${repoId}/search?q=${encodeURIComponent(q)}`),

@@ -1,11 +1,11 @@
 import json
 
 import numpy as np
+from fakes import ScriptedChat, reply
+from scenes import SKY_DUSK, scene
 
 from app import storage
 from app.ai import wonder
-from fakes import ScriptedChat, reply
-from scenes import SKY_DUSK, scene
 
 
 def run(client, repo, ask="Take the sky from v1 and warm it"):

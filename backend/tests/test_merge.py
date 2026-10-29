@@ -1,8 +1,8 @@
 import numpy as np
 from PIL import ImageDraw
+from scenes import scene
 
 from app import storage
-from scenes import scene
 
 TOP_LEFT = (20, 20, 90, 70)
 BOTTOM_RIGHT = (420, 300, 490, 360)

@@ -39,6 +39,16 @@ export default function CommitDetail({
     }
   };
 
+  const retryAnalysis = async () => {
+    try {
+      await api.retryAnalysis(commit.id);
+      setError(null);
+      onNotesChanged(); // refreshes the graph, which starts polling until analysis finishes
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  };
+
   return (
     <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
       <div className="flex items-center justify-center rounded-md bg-zinc-900 p-2">
@@ -55,8 +65,13 @@ export default function CommitDetail({
             v{commit.seq} · {commit.branch} · {timeAgo(commit.created_at)}
           </p>
           <h2 className="mt-1 text-lg font-medium">{commitTitle(commit)}</h2>
-          <div className="mt-1">
+          <div className="mt-1 flex items-center gap-2">
             <StatusBadge status={commit.analysis_status} />
+            {commit.analysis_status === "failed" && (
+              <button onClick={retryAnalysis} className="text-xs text-orange-400 hover:underline">
+                Retry
+              </button>
+            )}
           </div>
           <p className="mt-2 text-xs text-zinc-500">
             {commit.width} × {commit.height}px

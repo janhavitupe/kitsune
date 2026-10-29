@@ -1,12 +1,12 @@
 import sqlite3
 
 import pytest
+from fakes import ScriptedChat, reply
+from scenes import SKY_DUSK, scene
 
 from app import db
 from app.ai import openweights, spark, wonder
 from app.config import settings
-from fakes import ScriptedChat, reply
-from scenes import SKY_DUSK, scene
 
 
 def story(client, repo):

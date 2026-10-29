@@ -4,6 +4,7 @@ import AssistantPanel from "../components/AssistantPanel";
 import CommitDetail from "../components/CommitDetail";
 import CompareView from "../components/CompareView";
 import ExploreDialog from "../components/ExploreDialog";
+import { FoxMark, Skeleton } from "../components/Logo";
 import MergeDialog from "../components/MergeDialog";
 import SearchBar from "../components/SearchBar";
 import StoryView from "../components/StoryView";
@@ -106,13 +107,34 @@ export default function RepoPage({ repoId, onBack }: Props) {
     return (
       <main className="p-6">
         <p className="text-red-400">{error}</p>
-        <button onClick={onBack} className="mt-4 text-orange-400 hover:underline">
-          ← Back to pieces
-        </button>
+        <div className="mt-4 flex gap-4">
+          <button onClick={refresh} className="rounded-md bg-orange-600 px-3 py-1.5 text-sm font-medium hover:bg-orange-500">
+            Try again
+          </button>
+          <button onClick={onBack} className="text-orange-400 hover:underline">
+            ← Back to pieces
+          </button>
+        </div>
       </main>
     );
   }
-  if (!repo) return <main className="p-6 text-zinc-500">Loading…</main>;
+  if (!repo) {
+    return (
+      <div className="flex min-h-screen flex-col" aria-label="Loading piece">
+        <header className="flex items-center gap-3 border-b border-zinc-800 px-4 py-3">
+          <FoxMark />
+          <Skeleton className="h-5 w-40" />
+          <Skeleton className="ml-auto h-8 w-32" />
+        </header>
+        <div className="flex gap-5 overflow-hidden border-b border-zinc-800 py-4 pl-28">
+          {[0, 1, 2, 3, 4].map((i) => (
+            <Skeleton key={i} className="h-[108px] w-[116px] shrink-0" />
+          ))}
+        </div>
+        <Skeleton className="m-4 h-[50vh]" />
+      </div>
+    );
+  }
 
   const [a, b] = [...picked].sort((x, y) => x.seq - y.seq);
   // Discarded explore branches are hidden, not deleted (history is append-only).
@@ -125,7 +147,9 @@ export default function RepoPage({ repoId, onBack }: Props) {
     <div className="flex min-h-screen flex-col">
       <header className="flex flex-wrap items-center gap-3 border-b border-zinc-800 px-4 py-3">
         <button onClick={onBack} className="text-lg font-semibold hover:text-orange-400" title="All pieces">
-          <span aria-hidden>🦊</span> Kitsune
+          <span className="flex items-center gap-1.5">
+            <FoxMark /> Kitsune
+          </span>
         </button>
         <span className="text-zinc-600">/</span>
         <h1 className="truncate font-medium">{repo.name}</h1>

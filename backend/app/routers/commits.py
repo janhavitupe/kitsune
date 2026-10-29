@@ -54,3 +54,14 @@ def list_commits(repo_id: int, conn: sqlite3.Connection = Depends(get_db)):
 @router.get("/commits/{commit_id}", response_model=Commit)
 def get_commit(commit_id: int, conn: sqlite3.Connection = Depends(get_db)):
     return get_commit_or_404(conn, commit_id)
+
+
+@router.post("/commits/{commit_id}/analyze", status_code=202, response_model=Commit)
+def retry_analysis(commit_id: int, background: BackgroundTasks, conn: sqlite3.Connection = Depends(get_db)):
+    """Run analysis again after it failed. Every step is safe to repeat."""
+    commit = get_commit_or_404(conn, commit_id)
+    if commit.analysis_status != "failed":
+        raise HTTPException(409, f"Analysis is {commit.analysis_status}, not failed")
+    conn.execute("UPDATE commits SET analysis_status = 'pending' WHERE id = ?", (commit_id,))
+    background.add_task(jobs.run_analysis, commit_id)
+    return get_commit_or_404(conn, commit_id)

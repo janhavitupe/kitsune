@@ -2,12 +2,12 @@ import io
 
 import numpy as np
 from PIL import Image, ImageDraw
+from scenes import FIGURE_BOX, SKY_DUSK, scene, sky_mask
 
 from app import storage
 from app.ai import image as ai_image
 from app.services import cherry_pick, compose
 from app.services.segmentation import RawMask, save_regions
-from scenes import FIGURE_BOX, SKY_DUSK, scene, sky_mask
 
 TOP_LEFT = ((20, 20, 90, 70), (250, 250, 250))
 BOTTOM_RIGHT = ((420, 300, 490, 360), (240, 220, 40))

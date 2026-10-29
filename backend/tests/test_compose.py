@@ -1,7 +1,7 @@
 import numpy as np
+from scenes import box_mask
 
 from app.services import compose
-from scenes import box_mask
 
 
 def test_alpha_is_full_inside_and_fades_outside():

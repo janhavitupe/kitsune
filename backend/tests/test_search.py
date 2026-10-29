@@ -1,7 +1,8 @@
 from types import SimpleNamespace
 
-from app.ai import spark
 from scenes import SKY_DUSK, scene
+
+from app.ai import spark
 
 
 def search(client, repo, q):

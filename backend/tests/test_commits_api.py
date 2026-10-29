@@ -30,6 +30,24 @@ def test_background_analysis_finishes(client, repo, upload):
     assert client.get(f"/api/commits/{v1['id']}").json()["analysis_status"] == "done"
 
 
+
+def test_retry_failed_analysis(client, repo, upload, monkeypatch):
+    from app import jobs
+
+    def boom(conn, commit_id):
+        raise RuntimeError("model down")
+
+    monkeypatch.setattr(jobs, "ANALYSIS_STEPS", [boom])
+    v1 = upload(repo["id"], (10, 0, 0))
+    assert client.get(f"/api/commits/{v1['id']}").json()["analysis_status"] == "failed"
+
+    monkeypatch.setattr(jobs, "ANALYSIS_STEPS", [])
+    r = client.post(f"/api/commits/{v1['id']}/analyze")
+    assert r.status_code == 202
+    assert client.get(f"/api/commits/{v1['id']}").json()["analysis_status"] == "done"
+    # Only a failed analysis can be retried.
+    assert client.post(f"/api/commits/{v1['id']}/analyze").status_code == 409
+
 def test_branch_from_old_version(client, repo, upload):
     v1 = upload(repo["id"], (10, 0, 0))
     upload(repo["id"], (20, 0, 0))

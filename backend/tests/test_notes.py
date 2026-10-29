@@ -1,7 +1,8 @@
 from types import SimpleNamespace
 
-from app.ai import spark, voice
 from scenes import scene
+
+from app.ai import spark, voice
 
 
 def add(client, commit, kind="artist", text=None, audio=None, name="note.webm"):

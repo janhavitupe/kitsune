@@ -1,10 +1,11 @@
 from types import SimpleNamespace
 
+from scenes import SKY_DUSK, scene, sky_mask
+
 from app.ai import spark
 from app.config import settings
 from app.services import diffing
 from app.services.segmentation import RawMask, save_regions
-from scenes import SKY_DUSK, scene, sky_mask
 
 
 def two_versions(repo, upload):

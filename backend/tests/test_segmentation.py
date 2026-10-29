@@ -1,8 +1,8 @@
 import numpy as np
+from scenes import H, W, box_mask, scene
 
 from app import storage
 from app.services.segmentation import RawMask, has_regions, load_regions, postprocess, save_regions
-from scenes import H, W, box_mask, scene
 
 
 def test_postprocess_drops_confetti_and_duplicates():

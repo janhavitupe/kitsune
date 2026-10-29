@@ -1,9 +1,9 @@
 import io
 
 import pytest
+from scenes import scene
 
 from app.config import settings
-from scenes import scene
 
 
 @pytest.fixture(autouse=True)

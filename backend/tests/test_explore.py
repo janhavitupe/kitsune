@@ -1,11 +1,11 @@
 import numpy as np
 from PIL import ImageDraw
+from scenes import scene
 
 from app import storage
 from app.ai import image as ai_image
 from app.services import explore
 from app.services.pixel_diff import to_lab
-from scenes import scene
 
 
 def explore_post(client, commit, **body):
