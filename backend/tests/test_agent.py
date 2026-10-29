@@ -49,7 +49,7 @@ def test_plan_then_tools_then_summary(client, conn, repo, upload, monkeypatch):
     assert branches[final["branch"]]["head_commit_id"] == final["working_commit"]
     picked, adjusted = (client.get(f"/api/commits/{i}").json() for i in final["created"])
     assert picked["parent_id"] == v2["id"] and adjusted["parent_id"] == picked["id"]
-    assert adjusted["origin"] == "assistant" and adjusted["origin_meta"]["method"] == "fast"
+    assert adjusted["origin"] == "assistant"
     # The sky really came back: v3's sky matches v1's.
     a = np.asarray(storage.load_rgb(conn, v1["blob_sha"]))
     b = np.asarray(storage.load_rgb(conn, picked["blob_sha"]))
@@ -105,7 +105,8 @@ def test_without_wonder_simple_asks_still_run(client, conn, repo, upload):
     assert events[0]["type"] == "plan" and "Muse Wonder is unavailable" in events[0]["text"]
     calls = [(e["name"], e["arguments"]) for e in events if e["type"] == "tool_call"]
     assert calls == [
-        ("bring_back", {"source_version": "v1", "label": label}),  # "sky" found the changed area by place
+        # "sky" found the changed area by place
+        ("bring_back", {"source_version": "v1", "label": label, "drawn": False, "name": "sky"}),
         ("adjust", {"instruction": "warm it"}),
         ("set_message", {"message": "day sky, warmer"}),
     ]

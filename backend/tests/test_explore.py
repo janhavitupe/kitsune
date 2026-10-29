@@ -3,8 +3,6 @@ from PIL import ImageDraw
 from scenes import scene
 
 from app import storage
-from app.ai import image as ai_image
-from app.services import explore
 from app.services.pixel_diff import to_lab
 
 
@@ -25,7 +23,6 @@ def test_presets_make_three_branches(client, conn, repo, upload):
         "explore/warm-golden-hour", "explore/cool-moonlit-night", "explore/muted-overcast",
     ]
     assert all(v["parent_id"] == v1["id"] and v["origin"] == "explore" for v in variants)
-    assert all(v["origin_meta"]["method"] == "fast" for v in variants)
     kinds = {b["name"]: b["kind"] for b in client.get(f"/api/repos/{repo['id']}").json()["branches"]}
     assert kinds["explore/warm-golden-hour"] == "explore" and kinds["main"] == "normal"
 
@@ -42,38 +39,24 @@ def test_exploring_again_gets_new_branch_names(client, repo, upload):
     assert explore_post(client, v1).json()[0]["branch"] == "explore/warm-golden-hour-2"
 
 
-def test_custom_prompt_and_ai_mode_need_the_models(client, repo, upload):
+def test_custom_prompt_uses_the_color_shifts(client, conn, repo, upload):
     v1 = upload(repo["id"], scene())
-    assert explore_post(client, v1, prompt="try three palettes").status_code == 503
-    assert explore_post(client, v1, mode="ai").status_code == 503
-    assert explore_post(client, v1, prompt="x", mode="fast").status_code == 400
-    assert explore_post(client, v1, mode="magic").status_code == 400
+    r = explore_post(client, v1, prompt="something warm, or darker")
+    assert r.status_code == 201, r.text
+    assert [v["origin_meta"]["direction"] for v in r.json()] == ["something warm", "darker"]
+    assert explore_post(client, v1, prompt="paint me a dragon").status_code == 400
 
 
-def test_ai_variants_keep_the_drawing(client, conn, repo, upload, monkeypatch):
-    def model(conn, img, sha, direction):
-        out = np.clip(img.astype(int) + [60, 20, -40], 0, 255).astype(np.uint8)
-        moved = out.copy()
-        moved[150:330, 300:370] = moved[150:330, 220:290]  # the model "moved" the figure
-        return moved
-
-    monkeypatch.setattr(ai_image, "recolor", model)
-    v1 = upload(repo["id"], scene())
-    variants = explore_post(client, v1).json()
-    assert all(v["origin_meta"]["method"] == "ai" for v in variants)
-    base, ai = lab_of(conn, v1), lab_of(conn, variants[0])
-    # The figure stays where it was drawn: lightness detail comes from the original.
-    assert abs(ai[240, 335, 0] - base[240, 335, 0]) < 8
-    assert ai[..., 2].mean() > base[..., 2].mean()  # but the colors are the model's
-
-
-def test_keep_composition_on_itself_is_close_to_identity():
-    img = np.asarray(scene())
-    ImageDraw.Draw(out := scene()).line((10, 10, 400, 300), fill=(0, 0, 0), width=2)
-    line = np.asarray(out)
-    assert np.abs(explore.keep_composition(img, img).astype(int) - img).mean() < 3
-    # A thin line the model drew is not carried over.
-    assert np.abs(explore.keep_composition(img, line).astype(int) - img).mean() < 3
+def test_lines_and_shapes_stay_where_they_were_drawn(client, conn, repo, upload):
+    img = scene()
+    ImageDraw.Draw(img).line((10, 10, 400, 300), fill=(0, 0, 0), width=2)
+    v1 = upload(repo["id"], img)
+    base = lab_of(conn, v1)
+    for v in explore_post(client, v1).json():
+        out = lab_of(conn, v)
+        # Same edges: the lightness gradient is only scaled, never moved.
+        gb, go = np.abs(np.diff(base[..., 0], axis=1)) > 5, np.abs(np.diff(out[..., 0], axis=1)) > 3
+        assert (gb & ~go).sum() < 0.02 * gb.sum()
 
 
 def test_keep_and_discard_branches(client, repo, upload):

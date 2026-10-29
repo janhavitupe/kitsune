@@ -224,11 +224,11 @@ export const api = {
   cherryPickPreviewUrl: (target: number, source: number, label: string) =>
     `${BASE}/api/commits/${target}/cherry-pick/preview?source=${source}&label=${encodeURIComponent(label)}`,
   cherryPick: (target: number, source: number, label: string) =>
-    request<Commit>(`/api/commits/${target}/cherry-pick`, json({ source_commit: source, label, blend: "auto" })),
+    request<Commit>(`/api/commits/${target}/cherry-pick`, json({ source_commit: source, label })),
   planMerge: (repoId: number, source: string, target: string) =>
     request<MergePlan>(`/api/repos/${repoId}/merges`, json({ source, target })),
   resolveMerge: (mergeId: number, choices: Record<number, Side>) =>
-    request<Commit>(`/api/merges/${mergeId}/resolve`, json({ choices, blend: "auto" })),
+    request<Commit>(`/api/merges/${mergeId}/resolve`, json({ choices })),
   abortMerge: (mergeId: number) => request<MergePlan>(`/api/merges/${mergeId}/abort`, { method: "POST" }),
   updateBranch: (branchId: number, patch: { name?: string; kind?: string }) =>
     request<Branch>(`/api/branches/${branchId}`, { ...json(patch), method: "PATCH" }),
@@ -248,7 +248,7 @@ export const api = {
   search: (repoId: number, q: string) =>
     request<SearchResponse>(`/api/repos/${repoId}/search?q=${encodeURIComponent(q)}`),
   explore: (commitId: number, prompt: string) =>
-    request<Commit[]>(`/api/commits/${commitId}/explore`, json({ prompt: prompt.trim() || null, mode: "auto" })),
+    request<Commit[]>(`/api/commits/${commitId}/explore`, json({ prompt: prompt.trim() || null })),
   uploadCommit: (repoId: number, file: File, branch: string, message: string) => {
     const form = new FormData();
     form.append("image", file);

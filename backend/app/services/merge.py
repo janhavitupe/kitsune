@@ -25,7 +25,6 @@ from PIL import Image
 
 from app import storage
 from app.services import blending, commits, compose, diffing, pixel_diff
-from app.services.blending import BLEND_MODES
 from app.services.graph import common_ancestor
 from app.services.region_diff import ChangedRegion
 
@@ -155,13 +154,11 @@ def _message(p: dict, taken: list[str]) -> str:
     return msg
 
 
-def resolve(conn: sqlite3.Connection, merge_id: int, choices: dict[int, str], blend: str = "auto") -> int:
+def resolve(conn: sqlite3.Connection, merge_id: int, choices: dict[int, str]) -> int:
     """Write the merge commit. choices: conflict index → "source" | "target" (default "target")."""
     p = get(conn, merge_id)
     if p["status"] != "open":
         raise MergeError(f"This merge is already {p['status']}", 409)
-    if blend not in BLEND_MODES:
-        raise MergeError(f"blend must be one of {', '.join(BLEND_MODES)}")
     if bad := {v for v in choices.values()} - {"source", "target"}:
         raise MergeError(f"Choices must be 'source' or 'target', not {', '.join(sorted(bad))}")
     if unknown := set(choices) - {c["index"] for c in p["conflicts"]}:
@@ -177,7 +174,7 @@ def resolve(conn: sqlite3.Connection, merge_id: int, choices: dict[int, str], bl
     taken = [a["label"] for a in p["auto"]]
     meta = {"source_branch": p["source"], "source_head": x, "base": p["base"], "merge_id": merge_id}
     if p["fast_forward"]:
-        blob_sha, used = _blob_sha(conn, x), "none"
+        blob_sha = _blob_sha(conn, x)
     else:
         c = classify(conn, p["base"], x, y)
         take = np.zeros(c.size[::-1], dtype=bool)
@@ -190,13 +187,9 @@ def resolve(conn: sqlite3.Connection, merge_id: int, choices: dict[int, str], bl
         tgt_img = storage.load_rgb(conn, _blob_sha(conn, y))
         full = tgt_img.size
         src_img = storage.load_rgb(conn, _blob_sha(conn, x)).resize(full, Image.Resampling.LANCZOS)
-        try:
-            img, used = blending.blend_into(
-                conn, np.asarray(tgt_img), np.asarray(src_img),
-                compose.resize_mask(take, full), compose.resize_mask(c.protect, full), blend,
-            )
-        except blending.BlendUnavailable as e:
-            raise MergeError(str(e), 503) from e
+        img = blending.paste(
+            np.asarray(tgt_img), np.asarray(src_img), compose.resize_mask(take, full), compose.resize_mask(c.protect, full),
+        )
         out = io.BytesIO()
         Image.fromarray(img).save(out, format="PNG", compress_level=storage.PNG_COMPRESS_LEVEL)
         blob_sha = storage.put_image(conn, out.getvalue())["sha256"]
@@ -209,7 +202,7 @@ def resolve(conn: sqlite3.Connection, merge_id: int, choices: dict[int, str], bl
             blob_sha=blob_sha,
             message=_message(p, taken),
             origin="merge",
-            origin_meta={**meta, "taken": taken, "blend": used},
+            origin_meta={**meta, "taken": taken},
             require_head=y,
             merge_parent_id=x,
         )

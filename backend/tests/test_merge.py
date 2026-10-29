@@ -34,8 +34,8 @@ def plan(client, repo, source, target="main"):
     return client.post(f"/api/repos/{repo['id']}/merges", json={"source": source, "target": target})
 
 
-def resolve(client, merge_id, choices=None, blend="fast"):
-    return client.post(f"/api/merges/{merge_id}/resolve", json={"choices": choices or {}, "blend": blend})
+def resolve(client, merge_id, choices=None):
+    return client.post(f"/api/merges/{merge_id}/resolve", json={"choices": choices or {}})
 
 
 def test_changes_on_different_sides_merge_automatically(client, conn, repo, upload):
@@ -103,7 +103,6 @@ def test_target_unchanged_takes_the_branch_as_is(client, conn, repo, upload):
     assert p["fast_forward"] and [a["label"] for a in p["auto"]] == ["bottom-right area"]
     m = resolve(client, p["id"]).json()
     assert m["blob_sha"] == d1["blob_sha"] and m["parent_id"] == v1["id"] and m["merge_parent_id"] == d1["id"]
-    assert m["origin_meta"]["blend"] == "none"
 
 
 def test_nothing_to_merge(client, repo, upload):
@@ -137,7 +136,6 @@ def test_errors(client, repo, upload):
     p = plan(client, repo, "patch").json()
     assert resolve(client, p["id"], {"5": "source"}).status_code == 400  # no such conflict
     assert resolve(client, p["id"], {"0": "both"}).status_code == 422
-    assert resolve(client, p["id"], blend="magic").status_code == 400
     assert client.post(f"/api/merges/{p['id']}/abort").json()["status"] == "aborted"
     assert resolve(client, p["id"]).status_code == 409
     assert client.get("/api/merges/999").status_code == 404

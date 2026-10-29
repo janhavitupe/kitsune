@@ -2,10 +2,9 @@ import io
 
 import numpy as np
 from PIL import Image, ImageDraw
-from scenes import FIGURE_BOX, SKY_DUSK, scene, sky_mask
+from scenes import FIGURE_BOX, SKY_DAY, SKY_DUSK, scene, sky_mask
 
 from app import storage
-from app.ai import image as ai_image
 from app.services import cherry_pick, compose
 from app.services.segmentation import RawMask, save_regions
 
@@ -24,11 +23,8 @@ def two_patches():
     return img
 
 
-def pick(client, target, source, label, blend="fast"):
-    return client.post(
-        f"/api/commits/{target['id']}/cherry-pick",
-        json={"source_commit": source["id"], "label": label, "blend": blend},
-    )
+def pick(client, target, source, label):
+    return client.post(f"/api/commits/{target['id']}/cherry-pick", json={"source_commit": source["id"], "label": label})
 
 
 def test_brings_back_one_area_and_keeps_the_other(client, conn, repo, upload):
@@ -42,7 +38,7 @@ def test_brings_back_one_area_and_keeps_the_other(client, conn, repo, upload):
     v3 = r.json()
     assert v3["parent_id"] == v2["id"] and v3["origin"] == "cherry_pick"
     assert v3["message"] == "Brought back the top-left area from v1"
-    assert v3["origin_meta"] == {"source_commit": v1["id"], "source_seq": 1, "label": "top-left area", "blend": "fast"}
+    assert v3["origin_meta"] == {"source_commit": v1["id"], "source_seq": 1, "label": "top-left area", "drawn": False}
 
     old, new, out = pixels(conn, v1), pixels(conn, v2), pixels(conn, v3)
     assert np.array_equal(out[45, 55], old[45, 55])  # inside the top-left patch: back to v1
@@ -80,34 +76,42 @@ def test_named_region_once_segmented(client, conn, repo, upload):
     assert np.array_equal(out[330, 455], new[330, 455])  # the new yellow patch stays
 
 
-def test_ai_blend_is_used_but_cannot_touch_outside_the_seam(client, conn, repo, upload, monkeypatch):
-    calls = []
+LANTERN = ((330, 60, 350, 90), (255, 225, 150))
 
-    def noisy_model(conn, crop, band):
-        calls.append(crop.shape)
-        return np.random.default_rng(0).integers(0, 256, crop.shape, dtype=np.uint8)
 
-    monkeypatch.setattr(ai_image, "blend_seam", noisy_model)
+def test_a_later_drawing_is_never_pasted_over(client, conn, repo, upload):
+    # v3 adds a lantern in the dusk sky. Bringing v1's day sky back must keep the lantern as drawn.
     v1 = upload(repo["id"], scene())
-    v2 = upload(repo["id"], two_patches())
-    ai = pick(client, v2, v1, "top-left area", blend="ai")
-    assert ai.status_code == 201, ai.text
-    assert ai.json()["origin_meta"]["blend"] == "ai" and calls
-
-    # Against the same pick blended fast, the model's noise only shows up around the picked patch.
-    fast_img, _ = cherry_pick.build(conn, v1["id"], v2["id"], "top-left area", blend="fast")
-    differs = np.any(fast_img != pixels(conn, ai.json()), axis=2)
-    ys, xs = np.nonzero(differs)
-    assert differs.any()
-    assert ys.max() < 120 and xs.max() < 140  # all within the top-left patch's seam
+    upload(repo["id"], scene(sky=SKY_DUSK))
+    v3 = upload(repo["id"], scene(sky=SKY_DUSK, extra=LANTERN))
+    r = pick(client, v3, v1, "top area")
+    assert r.status_code == 201, r.text
+    out, old, new = pixels(conn, r.json()), pixels(conn, v1), pixels(conn, v3)
+    assert np.array_equal(out[75, 340], new[75, 340])  # the lantern
+    assert np.array_equal(out[60, 60], old[60, 60])  # the day sky
 
 
-def test_auto_blend_falls_back_without_a_key(client, repo, upload):
+def test_bring_back_something_drawn_in_that_version(client, conn, repo, upload):
+    # The lantern was drawn in v2 and painted over in v3; "drawn" copies exactly what v2 added.
+    upload(repo["id"], scene(sky=SKY_DUSK))
+    v2 = upload(repo["id"], scene(sky=SKY_DUSK, extra=LANTERN))
+    v3 = upload(repo["id"], scene(sky=SKY_DAY))
+    (label,) = cherry_pick.drawn_labels(conn, v2["id"])
+    r = client.post(f"/api/commits/{v3['id']}/cherry-pick", json={"source_commit": v2["id"], "label": label, "drawn": True})
+    assert r.status_code == 201, r.text
+    assert r.json()["origin_meta"]["drawn"] is True
+    out, src, new = pixels(conn, r.json()), pixels(conn, v2), pixels(conn, v3)
+    assert np.array_equal(out[75, 340], src[75, 340])  # the lantern is back
+    assert np.array_equal(out[60, 60], new[60, 60])  # the rest of the sky is v3's
+
+
+def test_only_the_artists_own_pixels(client, conn, repo, upload):
+    # Every output pixel is the target's, the source's, or a mix of the two at the soft edge.
     v1 = upload(repo["id"], scene())
-    v2 = upload(repo["id"], two_patches())
-    r = pick(client, v2, v1, "top-left area", blend="auto")
-    assert r.status_code == 201 and r.json()["origin_meta"]["blend"] == "fast"
-    assert pick(client, r.json(), v1, "bottom-right area", blend="ai").status_code == 503
+    v2 = upload(repo["id"], scene(sky=SKY_DUSK, figure=(40, 70, 140), extra=TOP_LEFT))
+    out = pixels(conn, pick(client, v2, v1, "top area").json()).astype(int)
+    a, b = pixels(conn, v1).astype(int), pixels(conn, v2).astype(int)
+    assert (out >= np.minimum(a, b) - 1).all() and (out <= np.maximum(a, b) + 1).all()
 
 
 def test_errors(client, repo, upload):
@@ -116,7 +120,6 @@ def test_errors(client, repo, upload):
     assert pick(client, v2, v1, "sky").status_code == 404  # no such changed region
     assert pick(client, v2, v2, "top-left area").status_code == 400
     assert pick(client, v1, v2, "top-left area").status_code == 409  # v1 isn't the head
-    assert pick(client, v2, v1, "top-left area", blend="magic").status_code == 400
     assert client.post("/api/commits/999/cherry-pick", json={"source_commit": 1, "label": "x"}).status_code == 404
 
 

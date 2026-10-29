@@ -19,7 +19,7 @@ router = APIRouter(tags=["cherry-pick"])
 class CherryPickRequest(BaseModel):
     source_commit: int
     label: str
-    blend: str = "auto"  # auto: AI seam blend when available, else fast | ai | fast
+    drawn: bool = False  # label names something drawn in the source itself, not a change since then
 
 
 @router.post("/commits/{target_id}/cherry-pick", status_code=201, response_model=Commit)
@@ -29,10 +29,10 @@ def create_cherry_pick(
     background: BackgroundTasks,
     conn: sqlite3.Connection = Depends(get_db),
 ):
-    """Bring one changed region of an older version back into the target, as a new commit."""
+    """Copy one region of an older version back into the target, as a new commit."""
     get_commit_or_404(conn, target_id)
     try:
-        commit_id = cherry_pick.cherry_pick(conn, target_id, body.source_commit, body.label, body.blend)
+        commit_id = cherry_pick.cherry_pick(conn, target_id, body.source_commit, body.label, body.drawn)
     except cherry_pick.CherryPickError as e:
         raise HTTPException(e.status_code, str(e)) from e
     background.add_task(jobs.run_analysis, commit_id)
@@ -44,12 +44,13 @@ def preview_cherry_pick(
     target_id: int,
     source: int = Query(),
     label: str = Query(),
+    drawn: bool = Query(False),
     conn: sqlite3.Connection = Depends(get_db),
 ):
-    """A quick look at the result (fast blend, reduced size). Nothing is saved."""
+    """A quick look at the result at reduced size. Nothing is saved."""
     get_commit_or_404(conn, target_id)
     try:
-        img, _ = cherry_pick.build(conn, source, target_id, label, blend="fast", max_side=settings.diff_analysis_px)
+        img = cherry_pick.build(conn, source, target_id, label, drawn, max_side=settings.diff_analysis_px)
     except cherry_pick.CherryPickError as e:
         raise HTTPException(e.status_code, str(e)) from e
     out = io.BytesIO()

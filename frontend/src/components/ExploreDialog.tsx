@@ -26,7 +26,7 @@ export default function ExploreDialog({ commit, branches, onClose, onChanged }: 
     return () => window.removeEventListener("keydown", onKey);
   }, [busy, onClose]);
 
-  const generate = async () => {
+  const shift = async () => {
     setBusy(true);
     setError(null);
     try {
@@ -65,7 +65,8 @@ export default function ExploreDialog({ commit, branches, onClose, onChanged }: 
       >
         <h2 className="text-lg font-semibold">Explore palettes for v{commit.seq}</h2>
         <p className="mt-1 text-sm text-zinc-400">
-          Each variation becomes its own branch. Keep the ones worth following; discarded ones are hidden, not deleted.
+          Shifts the colors you painted, like an adjustment layer; nothing is redrawn. Each variation becomes its own
+          branch. Keep the ones worth following; discarded ones are hidden, not deleted.
         </p>
 
         {!variants && (
@@ -73,11 +74,11 @@ export default function ExploreDialog({ commit, branches, onClose, onChanged }: 
             <input
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
-              placeholder="Optional: e.g. try 3 palettes for a stormy mood"
+              placeholder="Optional: e.g. warmer, or darker"
               className="min-w-0 flex-1 rounded-md border border-zinc-700 bg-zinc-950 px-3 py-1.5 text-sm outline-none focus:border-orange-500"
             />
             <button
-              onClick={generate}
+              onClick={shift}
               disabled={busy}
               className="rounded-md bg-orange-600 px-4 py-1.5 text-sm font-medium hover:bg-orange-500 disabled:opacity-50"
             >

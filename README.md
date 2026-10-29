@@ -6,6 +6,8 @@ Save versions of a painting, branch to try ideas, and see exactly what changed b
 
 > Built for the Meta Global AI Developer Hackathon (indie track), with Muse Code.
 
+**Kitsune never makes art.** No model paints, repaints, inpaints or generates a single pixel. Every image Kitsune saves is made of the artist's own pixels: a bring-back copies the part *you drew* in one version into another, pixel for pixel, and leaves everything else exactly as you drew it. AI only *reads* your work (names regions, writes messages, transcribes notes, finds versions, plans steps) so you spend less time managing files and more time painting.
+
 ## What it does
 
 | | Feature | How |
@@ -14,16 +16,16 @@ Save versions of a painting, branch to try ideas, and see exactly what changed b
 | ↔ | **Compare** any two versions: before/after slider, synced side-by-side zoom | |
 | 🔍 | **Semantic visual diff**: changed areas outlined and named, with how they changed (warmer, darker, more muted, redrawn) | OpenCV change mask in Lab space ∩ **SAM 3.1** regions; change split by kind of color shift |
 | ✍ | **Auto commit messages**: "Warmed the sky into a dusk palette and tightened the left figure's silhouette." | **Muse Spark** with the measured changes as structured hints |
-| ↩ | **Region cherry-pick**: bring one region of an old version back into the latest one | Feathered composite + **Muse Image** seam blending, guarded so it can only touch the seam |
+| ↩ | **Region cherry-pick**: bring back part of an old version (the old sky, or the lantern you drew in v4) into the latest one | A pixel-for-pixel copy of your own painting with a soft edge; anything drawn later in that area (a lantern in the sky) is kept, never pasted over |
 | 🔀 | **Smart merge**: changes on one branch only are taken, changes on both become pick-one cards | Three-way region diff against the common ancestor |
 | 🎙 | **Notes and client feedback**, typed or recorded, pinned to a version | **Muse Voice Transcribe**; Spark turns long client feedback into a list of requested changes |
 | 🔎 | **Searchable history**, including "before / after / when I changed X" | SQLite FTS5 over messages, notes, captions, changed regions; Spark captions each version and reads the query |
-| 🎨 | **Explore branches**: three palette variations, each on its own branch, keep or discard | **Muse Image** recolor that keeps the original drawing exactly |
+| 🎨 | **Explore branches**: three palette variations, each on its own branch, keep or discard | Color shifts of your own pixels (warm, cool, muted, brighter, darker), like an adjustment layer; nothing is redrawn |
 | 🤖 | **Studio assistant**: "Take the sky from v4, keep today's figure, and warm it to match" | **Muse Wonder** plans, then calls Kitsune's own features as tools, every step shown live |
 | 📖 | **Process story**: the history as a portfolio breakdown | **Muse Wonder** |
 | 🔒 | **Private mode**: captions and search never leave your own model endpoint | Open weights (Muse Spark Open) on **Baseten**, back-filled with **Modal**; **Fireworks** as fallback |
 
-Every AI feature has an honest fallback, so nothing breaks when a model is slow or offline: messages fall back to the measured summary, search to rules, explore to color-space presets, the story to one assembled from the history, the assistant to a rule-based planner that runs simple asks ("take the sky from v2 and warm it") with the same tools, and voice notes to the browser's own speech recognition. Every model result is cached by its inputs, and `AI_OFFLINE=1` replays the demo with no model calls at all.
+Every AI feature has an honest fallback, so nothing breaks when a model is slow or offline: messages fall back to the measured summary, search to rules, the story to one assembled from the history, the assistant to a rule-based planner that runs simple asks ("take the sky from v2 and warm it") with the same tools, and voice notes to the browser's own speech recognition. Every model result is cached by its inputs, and `AI_OFFLINE=1` replays the demo with no model calls at all.
 
 **Works next to any paint app.** The `kitsune` command line tracks your paint app's own file (Photoshop `.psd`, Krita `.kra`, OpenRaster `.ora`) or an exported PNG, like git tracks a file: `commit`, `branch`, `switch`, `diff`, `merge`, `pick sky --from v3`, and `watch` to commit every time you save. It talks to the same backend, so the browser shows the same history.
 
@@ -35,7 +37,6 @@ Every AI feature has an honest fallback, so nothing breaks when a model is slow 
 | --- | --- | --- |
 | SAM 3.1 | Names regions for the diff, cherry-pick and merge | `backend/app/ai/sam.py`, `services/segmentation.py` |
 | Muse Spark | Commit messages, captions, note summaries, reading search queries | `backend/app/ai/spark.py` |
-| Muse Image | Seam blending for cherry-pick and merge; explore variations | `backend/app/ai/image.py` |
 | Muse Voice Transcribe | Voice notes and client voice feedback | `backend/app/ai/voice.py` |
 | Muse Wonder | Studio assistant (tool use) and process story | `backend/app/ai/wonder.py`, `services/agent.py` |
 | Open weights on Baseten / Fireworks | Private-mode captions and query reading | `backend/app/ai/openweights.py` |

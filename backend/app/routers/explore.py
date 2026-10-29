@@ -21,7 +21,6 @@ def search_history(repo_id: int, q: str = Query(min_length=1, max_length=200), c
 
 class ExploreRequest(BaseModel):
     prompt: str | None = None  # e.g. "try 3 palettes for this"; empty = the three presets
-    mode: str = "auto"  # auto: Muse Image when available | ai | fast (preset transforms only)
 
 
 @router.post("/commits/{commit_id}/explore", status_code=201, response_model=list[Commit])
@@ -31,7 +30,7 @@ def explore_commit(
     """Three palette variations of a version, each on its own explore branch."""
     get_commit_or_404(conn, commit_id)
     try:
-        ids = explore.explore(conn, commit_id, body.prompt, body.mode)
+        ids = explore.explore(conn, commit_id, body.prompt)
     except explore.ExploreError as e:
         raise HTTPException(e.status_code, str(e)) from e
     for i in ids:

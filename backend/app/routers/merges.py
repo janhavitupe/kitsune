@@ -20,7 +20,6 @@ class MergeRequest(BaseModel):
 
 class ResolveRequest(BaseModel):
     choices: dict[int, Literal["source", "target"]] = {}  # conflict index → side; default "target"
-    blend: str = "auto"
 
 
 def _plan(conn: sqlite3.Connection, merge_id: int) -> MergePlan:
@@ -52,7 +51,7 @@ def resolve_merge(
 ):
     """Write the merge commit with the artist's picks for each conflict."""
     try:
-        commit_id = merge.resolve(conn, merge_id, body.choices, body.blend)
+        commit_id = merge.resolve(conn, merge_id, body.choices)
     except merge.MergeError as e:
         raise HTTPException(e.status_code, str(e)) from e
     background.add_task(jobs.run_analysis, commit_id)

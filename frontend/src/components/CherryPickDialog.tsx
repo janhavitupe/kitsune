@@ -75,7 +75,7 @@ export default function CherryPickDialog({ source, target, label, onClose, onDon
             disabled={busy}
             className="rounded-md bg-orange-600 px-4 py-1.5 text-sm font-medium hover:bg-orange-500 disabled:opacity-50"
           >
-            {busy ? "Blending…" : `Bring back the ${label}`}
+            {busy ? "Copying…" : `Bring back the ${label}`}
           </button>
         </div>
       </div>

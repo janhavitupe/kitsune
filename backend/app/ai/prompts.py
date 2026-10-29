@@ -26,15 +26,6 @@ Regions: whole canvas (88%, cooler, more muted)
 Message: Shifted the whole palette cooler and more muted for a moonlit mood."""
 
 
-BLEND_SEAM_VERSION = 1
-
-BLEND_SEAM = (
-    "This is a crop of a digital painting where one area was brought back from an earlier version. "
-    "Blend the seam where the two painted areas meet so the transition looks painted, not pasted: "
-    "match brushwork, edges and lighting across it. Do not change anything else."
-)
-
-
 NOTE_SUMMARY_VERSION = 1
 
 NOTE_SUMMARY = {
@@ -78,11 +69,6 @@ EXPLORE_VERSION = 1
 EXPLORE_DIRECTIONS = """An artist asked to explore variations of their painting: "{prompt}".
 Give exactly three distinct palette or lighting directions, 2 to 5 words each, as a JSON list of strings.
 Example: ["warm golden hour", "cool moonlit night", "muted overcast"]. Reply with the JSON list only."""
-
-EXPLORE_EDIT = (
-    "Recolor this artwork to a {direction} palette and lighting. Keep the composition, linework, "
-    "shapes and every detail exactly the same; change only color and light."
-)
 
 
 ASSISTANT_SYSTEM = """You are the studio assistant in Kitsune, version control for a digital painter.

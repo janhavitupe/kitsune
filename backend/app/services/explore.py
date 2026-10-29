@@ -1,8 +1,7 @@
 """Explore branches (M4): "try 3 palettes for this" makes three preview branches off a version.
 
-Each direction is painted by Muse Image when available, else by a fixed color-space transform
-(the three presets only). Either way only color changes: the result keeps the original's
-lightness detail, so composition and linework can't drift.
+Each direction is a fixed color shift of the artist's own pixels (like an adjustment layer). Nothing
+is generated or repainted: every line and shape stays exactly as drawn.
 """
 
 import io
@@ -16,15 +15,11 @@ import numpy as np
 from PIL import Image
 
 from app import storage
-from app.ai import image as ai_image
 from app.ai import spark
 from app.db import now
 from app.services import commits
 
 log = logging.getLogger("kitsune.explore")
-
-MODES = ("auto", "ai", "fast")
-
 
 class ExploreError(ValueError):
     def __init__(self, message: str, status_code: int = 400):
@@ -70,22 +65,6 @@ PRESETS: list[tuple[str, Callable[[np.ndarray], np.ndarray]]] = [
 ]
 
 
-def keep_composition(original: np.ndarray, variant: np.ndarray) -> np.ndarray:
-    """The variant's colors on the original's structure: its overall light, the original's detail.
-
-    Lightness = variant's lightness at a coarse scale + the original's fine detail, so a model that
-    redraws a hand or moves a line can't change the drawing, only its color and light.
-    """
-    lo, lv = _lab(original), _lab(variant)
-    sigma = max(2.0, 0.01 * float(np.hypot(*original.shape[:2])))
-    blur = lambda ch: cv2.GaussianBlur(ch, (0, 0), sigma)  # noqa: E731
-    out = lv.copy()
-    out[..., 0] = np.clip(blur(lv[..., 0]) + (lo[..., 0] - blur(lo[..., 0])), 0, 100)
-    out[..., 1] = blur(lv[..., 1])
-    out[..., 2] = blur(lv[..., 2])
-    return _rgb(out)
-
-
 def slug(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")[:40] or "variant"
 
@@ -126,24 +105,15 @@ def preset_for(direction: str) -> Callable[[np.ndarray], np.ndarray] | None:
     return next((t for words, t in PRESET_WORDS if any(w in d for w in words)), None)
 
 
-def render(
-    conn: sqlite3.Connection, img: np.ndarray, sha: str, direction: str, mode: str = "auto",
-    transform: Callable[[np.ndarray], np.ndarray] | None = None,
-) -> tuple[np.ndarray, str]:
-    """`img` recolored toward `direction`: Muse Image (composition kept), or a preset transform."""
-    if mode not in MODES:
-        raise ExploreError(f"mode must be one of {', '.join(MODES)}")
-    transform = transform or preset_for(direction)
-    if mode != "fast":
-        try:
-            return keep_composition(img, ai_image.recolor(conn, img, sha, direction)), "ai"
-        except Exception as e:
-            if mode == "ai" or transform is None:
-                raise ExploreError(f"Muse Image is unavailable: {e}", 503) from e
-            log.info("'%s' fell back to the preset transform: %s", direction, e)
+PRESET_HINT = "warm, cool, muted, brighter or darker"
+
+
+def render(img: np.ndarray, direction: str) -> np.ndarray:
+    """`img` with its colors shifted toward `direction` (the closest preset)."""
+    transform = preset_for(direction)
     if transform is None:
-        raise ExploreError(f"No preset matches '{direction}'; that direction needs Muse Image")
-    return _rgb(transform(_lab(img))), "fast"
+        raise ExploreError(f"Explore only shifts the colors you painted; try {PRESET_HINT} instead of '{direction}'")
+    return _rgb(transform(_lab(img)))
 
 
 def save(conn: sqlite3.Connection, img: np.ndarray) -> str:
@@ -153,7 +123,7 @@ def save(conn: sqlite3.Connection, img: np.ndarray) -> str:
 
 
 def branch_variant(
-    conn: sqlite3.Connection, source: sqlite3.Row, direction: str, img: np.ndarray, used: str, origin: str = "explore",
+    conn: sqlite3.Connection, source: sqlite3.Row, direction: str, img: np.ndarray, origin: str = "explore",
 ) -> int:
     """Put a rendered variant of `source` on a new explore branch. Returns the commit id."""
     branch_id = conn.execute(
@@ -167,29 +137,42 @@ def branch_variant(
         blob_sha=save(conn, img),
         message=f"Explore: {direction} palette",
         origin=origin,
-        origin_meta={"source_commit": source["id"], "direction": direction, "method": used},
+        origin_meta={"source_commit": source["id"], "direction": direction},
     )
 
 
-def explore(conn: sqlite3.Connection, commit_id: int, prompt: str | None = None, mode: str = "auto") -> list[int]:
-    """Three explore branches off `commit_id`, one commit each. Returns the new commit ids."""
-    if mode not in MODES:
-        raise ExploreError(f"mode must be one of {', '.join(MODES)}")
+def _directions(conn: sqlite3.Connection, prompt: str) -> list[str]:
+    """Up to three directions from a request ("try 3 palettes for a stormy mood") that a preset covers.
+    Muse Spark reads the request when available; the request's own words are always tried too."""
+    try:
+        asked = spark.explore_directions(conn, prompt)
+    except Exception as e:
+        log.info("reading the explore request without Muse Spark: %s", e)
+        asked = []
+    asked += [part for part in re.split(r",|\band\b|\bor\b", prompt) if part.strip()]
+    seen, out = set(), []
+    for d in asked:
+        t = preset_for(d)
+        if t is not None and t not in seen:
+            seen.add(t)
+            out.append(d.strip())
+    return out[:3]
+
+
+def explore(conn: sqlite3.Connection, commit_id: int, prompt: str | None = None) -> list[int]:
+    """Explore branches off `commit_id`, one commit each. Returns the new commit ids."""
     source = conn.execute("SELECT * FROM commits WHERE id = ?", (commit_id,)).fetchone()
     if source is None:
         raise ExploreError(f"Commit {commit_id} not found", 404)
 
     if prompt and prompt.strip():
-        if mode == "fast":
-            raise ExploreError("Custom directions need Muse Image; leave the prompt empty for the presets")
-        try:
-            directions = [(d, None) for d in spark.explore_directions(conn, prompt.strip())]
-        except Exception as e:
-            raise ExploreError(f"Muse Spark is unavailable to read the request: {e}", 503) from e
+        directions = _directions(conn, prompt.strip())
+        if not directions:
+            raise ExploreError(f"Explore only shifts the colors you painted; try {PRESET_HINT}")
     else:
-        directions = PRESETS
+        directions = [d for d, _ in PRESETS]
 
     img = np.asarray(storage.load_rgb(conn, source["blob_sha"]))
-    # Render all three before writing anything, so a failure leaves no half-made set of branches.
-    rendered = [(d, *render(conn, img, source["blob_sha"], d, mode, t)) for d, t in directions]
-    return [branch_variant(conn, source, d, variant, used) for d, variant, used in rendered]
+    # Render all of them before writing anything, so a failure leaves no half-made set of branches.
+    rendered = [(d, render(img, d)) for d in directions]
+    return [branch_variant(conn, source, d, variant) for d, variant in rendered]

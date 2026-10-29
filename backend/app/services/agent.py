@@ -6,7 +6,8 @@ features as tools, at most MAX_TOOL_CALLS of them.
               list_commits · get_changes · get_regions · bring_back · adjust · try_variant · set_message
 
 Nothing is overwritten: images the assistant makes land on a new `assistant/...` branch started
-from the working version. run() yields events for the UI as they happen.
+from the working version. Nothing is painted either: the tools only copy the artist's own pixels
+between versions or shift their colors. run() yields events for the UI as they happen.
 """
 
 import json
@@ -43,12 +44,17 @@ TOOLS = [
         {"from_version": VERSION, "to_version": VERSION}, ["from_version", "to_version"]),
     _fn("get_regions", "The named regions (sky, figure, ...) of one version, if segmentation has run.",
         {"version": VERSION}, ["version"]),
-    _fn("bring_back", "Bring one changed region of an older version back into the working version. "
-        "The label must be a region name from get_changes(source_version, working version).",
-        {"source_version": VERSION, "label": {"type": "string"}}, ["source_version", "label"]),
-    _fn("adjust", "Recolor or relight the whole working version, e.g. \"warm it to match the sky\".",
+    _fn("bring_back", "Copy one region of an older version back into the working version, pixel for pixel. "
+        "The label is a region name from get_changes(source_version, working version), or with drawn=true, "
+        "a region from get_changes(the version before source_version, source_version): something the artist "
+        "drew in that version. Anything drawn later stays as it is.",
+        {"source_version": VERSION, "label": {"type": "string"},
+         "drawn": {"type": "boolean", "description": "label is something drawn in source_version itself"}},
+        ["source_version", "label"]),
+    _fn("adjust", "Shift the colors of the whole working version: warm, cool, muted, brighter or darker.",
         {"instruction": {"type": "string"}}, ["instruction"]),
-    _fn("try_variant", "Make a palette variation of the working version on its own side branch.",
+    _fn("try_variant", "Make a color-shifted copy of the working version (warm, cool, muted, brighter or darker) "
+        "on its own side branch.",
         {"direction": {"type": "string", "description": "e.g. \"cool moonlit night\""}}, ["direction"]),
     _fn("set_message", "Set the message of the newest version you made.", {"message": {"type": "string"}}, ["message"]),
 ]
@@ -131,11 +137,13 @@ class Run:
             return {"regions": [], "note": "Regions aren't named for this version yet; use get_changes instead."}
         return {"regions": labels}
 
-    def bring_back(self, source_version: str, label: str) -> dict:
+    def bring_back(self, source_version: str, label: str, drawn: bool = False, name: str | None = None) -> dict:
         source = self.commit(source_version)
         self.ensure_branch()
         try:
-            new = cherry_pick.cherry_pick(self.conn, self.working, source["id"], label, branch_id=self.branch_id)
+            new = cherry_pick.cherry_pick(
+                self.conn, self.working, source["id"], label, drawn, branch_id=self.branch_id, name=name,
+            )
         except cherry_pick.CherryPickError as e:
             raise ToolError(str(e)) from e
         self.working = new
@@ -145,14 +153,14 @@ class Run:
         cur = self.conn.execute("SELECT * FROM commits WHERE id = ?", (self.working,)).fetchone()
         img = np.asarray(storage.load_rgb(self.conn, cur["blob_sha"]))
         try:
-            out, used = explore.render(self.conn, img, cur["blob_sha"], instruction)
+            out = explore.render(img, instruction)
         except explore.ExploreError as e:
             raise ToolError(str(e)) from e
         self.ensure_branch()
         new = commits.create(
             self.conn, repo_id=self.repo_id, branch_id=self.branch_id, blob_sha=explore.save(self.conn, out),
             message=f"Assistant: {instruction}", origin="assistant",
-            origin_meta={"ask": self.ask, "instruction": instruction, "method": used}, require_head=self.working,
+            origin_meta={"ask": self.ask, "instruction": instruction}, require_head=self.working,
         )
         self.working = new
         return self.made(new)
@@ -161,10 +169,10 @@ class Run:
         cur = self.conn.execute("SELECT * FROM commits WHERE id = ?", (self.working,)).fetchone()
         img = np.asarray(storage.load_rgb(self.conn, cur["blob_sha"]))
         try:
-            out, used = explore.render(self.conn, img, cur["blob_sha"], direction)
+            out = explore.render(img, direction)
         except explore.ExploreError as e:
             raise ToolError(str(e)) from e
-        return self.made(explore.branch_variant(self.conn, cur, direction, out, used, origin="assistant"))
+        return self.made(explore.branch_variant(self.conn, cur, direction, out, origin="assistant"))
 
     def set_message(self, message: str) -> dict:
         if not self.created:
@@ -266,6 +274,7 @@ RULE_EXAMPLES = [
     "take the sky from v2 and warm it",
     "what changed since v3, then try a moonlit variant",
     'bring back the top-left area from v1 and call it "old patch"',
+    "bring back the lantern",
 ]
 
 # Without segmentation, change areas are named by position ("top area"); map common words onto them.
@@ -280,6 +289,7 @@ FILLER = re.compile(r"^(?:the|my|old|original|previous|earlier|that|this)\s+")
 MESSAGE = re.compile(r"\b(?:call it|name it)\s*:?\s*[\"“]([^\"”]+)[\"”]", re.I)
 CLAUSE_SPLIT = re.compile(r"\s*(?:,|;|\.(?!\d)|\bthen\b|\band\b)\s*", re.I)
 BRING_BACK = re.compile(r"(?:\b(?:take|bring back|bring|restore|use|get|keep|put back|reuse)\s+|^)(.+?)\s+from\s+v(\d+)\b")
+BRING_BACK_NAMED = re.compile(r"\b(?:bring back|restore|put back|reuse)\s+(.+)$")
 VARIANT_WORDS = re.compile(r"\b(try|a|an|variant|variation|alternative|option|version)\b")
 
 
@@ -309,6 +319,9 @@ def rule_steps(ask: str) -> tuple[list[Step], list[str]]:
         elif fm := BRING_BACK.search(c):
             what, source = FILLER.sub("", fm.group(1).strip()), f"v{fm.group(2)}"
             steps.append(Step("bring_back", {"source_version": source, "label": what}, f"Bring back the {what} from {source}"))
+        elif fm := BRING_BACK_NAMED.search(c):
+            what = FILLER.sub("", fm.group(1).strip())
+            steps.append(Step("bring_back", {"source_version": None, "label": what}, f"Bring back the {what}"))
         elif re.search(r"\b(try|variant|variation|alternative|option)\b", c) and explore.preset_for(c):
             direction = " ".join(VARIANT_WORDS.sub(" ", c).split()) or c
             steps.append(Step("try_variant", {"direction": direction}, f"Try a {direction} variation on a side branch"))
@@ -321,20 +334,48 @@ def rule_steps(ask: str) -> tuple[list[Step], list[str]]:
     return steps[:MAX_TOOL_CALLS], skipped
 
 
-def resolve_label(r: Run, source_version: str, what: str) -> str:
-    """The changed region the artist means by `what`: a label sharing a word with it, or the one change
-    area in the place the word implies (sky -> top). Never a guess between several."""
+def _words(text: str) -> list[str]:
+    return [w for w in text.lower().replace("-", " ").split() if len(w) > 2]
+
+
+def drawn_in(r: Run, what: str) -> str:
+    """The version where the artist drew `what`: the newest one whose message or notes mention it."""
+    for w in _words(what):
+        row = r.conn.execute(
+            "SELECT c.seq FROM commits c LEFT JOIN voice_notes n ON n.commit_id = c.id"
+            " WHERE c.repo_id = ? AND c.origin = 'upload'"
+            " AND (c.message LIKE ? OR n.transcript LIKE ? OR n.summary LIKE ?) ORDER BY c.seq DESC LIMIT 1",
+            (r.repo_id, *[f"%{w}%"] * 3),
+        ).fetchone()
+        if row:
+            return f"v{row[0]}"
+    raise ToolError(f"No version's message or notes mention '{what}'. Say which one, e.g. \"bring back the {what} from v3\"")
+
+
+def resolve_label(r: Run, source_version: str, what: str) -> tuple[str, bool]:
+    """The region the artist means by `what`, and whether it was drawn in the source itself.
+
+    First a region that changed since the source: one sharing a word with `what`, or the one change
+    area in the place the word implies (sky -> top). Otherwise something drawn in the source version
+    (its change from the version before): the one sharing a word, or the only thing drawn there.
+    Never a guess between several.
+    """
     labels = [x["label"] for x in r.get_changes(source_version, r.v(r.working))["regions"]]
     if not labels:
         raise ToolError(f"Nothing changed between {source_version} and the working version")
-    words = what.lower().replace("-", " ").split()
-    direct = [lb for lb in labels if any(w in lb.lower().replace("-", " ").split() for w in words if len(w) > 2)]
+    words = _words(what)
+    direct = [lb for lb in labels if any(w in _words(lb) for w in words)]
     if len(direct) == 1:
-        return direct[0]
+        return direct[0], False
     places = [p for p, synonyms in PLACE_WORDS.items() if p in words or any(s in words for s in synonyms)]
-    near = [lb for lb in labels if any(p in lb.lower().replace("-", " ").split() for p in places)]
+    near = [lb for lb in labels if any(p in _words(lb) for p in places)]
     if len(near) == 1:
-        return near[0]
+        return near[0], False
+
+    drawn = cherry_pick.drawn_labels(r.conn, r.commit(source_version)["id"])
+    named = [lb for lb in drawn if any(w in _words(lb) for w in words)]
+    if len(named) == 1 or len(drawn) == 1:
+        return (named or drawn)[0], True
     raise ToolError(f"No changed region matches '{what}'. What changed since {source_version}: {', '.join(labels)}")
 
 
@@ -348,7 +389,10 @@ def run_rule_steps(r: Run, steps: list[Step]) -> Iterator[dict]:
         called = False
         try:
             if st.tool == "bring_back":
-                args["label"] = resolve_label(r, args["source_version"], args["label"])
+                what = args["label"]
+                args["source_version"] = args["source_version"] or drawn_in(r, what)
+                args["label"], args["drawn"] = resolve_label(r, args["source_version"], what)
+                args["name"] = what
             yield {"type": "tool_call", "step": i, "name": st.tool, "arguments": args}
             called = True
             result = r.call(st.tool, args)

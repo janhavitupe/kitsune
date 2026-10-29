@@ -104,21 +104,6 @@ def probe_sam(client: OpenAI, _args):
     return dump(r)
 
 
-def probe_image(client: OpenAI, _args):
-    # Guess: OpenAI-style image edit. Also tells us whether a mask parameter is accepted.
-    r = client.images.edit(
-        model=settings.image_model,
-        image=("a.png", SKY_DAY, "image/png"),
-        prompt="Make the sky a warm dusk orange. Do not change anything else.",
-    )
-    result = dump(r)
-    for i, item in enumerate(result.get("data") or []):
-        if item.get("b64_json"):
-            (OUT / f"image_{i}.png").write_bytes(base64.b64decode(item["b64_json"]))
-            item["b64_json"] = f"<saved to image_{i}.png>"
-    return result
-
-
 def probe_voice(client: OpenAI, args):
     audio = Path(args.audio).read_bytes() if args.audio else silent_wav()
     name = Path(args.audio).name if args.audio else "tone.wav"
@@ -147,7 +132,6 @@ PROBES = {
     "models": probe_models,
     "spark": probe_spark,
     "sam": probe_sam,
-    "image": probe_image,
     "voice": probe_voice,
     "wonder": probe_wonder,
 }
