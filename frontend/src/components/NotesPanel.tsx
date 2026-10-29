@@ -15,6 +15,7 @@ export default function NotesPanel({ commitId, onChanged }: Props) {
   const [text, setText] = useState("");
   const [audio, setAudio] = useState<Blob | null>(null);
   const [audioName, setAudioName] = useState("note.webm");
+  const [heard, setHeard] = useState("");
   const [recorderKey, setRecorderKey] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -32,10 +33,11 @@ export default function NotesPanel({ commitId, onChanged }: Props) {
     setBusy(true);
     setError(null);
     try {
-      const note = await api.addNote(commitId, kind, text, audio, audioName);
+      const note = await api.addNote(commitId, kind, text, audio, audioName, heard);
       setNotes((n) => [...n, note]);
       setText("");
       setAudio(null);
+      setHeard("");
       setRecorderKey((k) => k + 1);
       onChanged();
     } catch (err) {
@@ -111,7 +113,7 @@ export default function NotesPanel({ commitId, onChanged }: Props) {
           placeholder={kind === "client" ? "Paste or type what the client asked for" : "Changed the sky because…"}
           className="w-full rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-sm outline-none focus:border-orange-500"
         />
-        <VoiceRecorder key={recorderKey} onRecorded={(b) => (setAudio(b), setAudioName("note.webm"))} />
+        <VoiceRecorder key={recorderKey} onRecorded={(b, h) => (setAudio(b), setAudioName("note.webm"), setHeard(h))} />
         <label className="block text-xs text-zinc-400">
           or attach a voice message:{" "}
           <input
@@ -121,6 +123,7 @@ export default function NotesPanel({ commitId, onChanged }: Props) {
             onChange={(e) => {
               const f = e.target.files?.[0] ?? null;
               setAudio(f);
+              setHeard("");
               if (f) setAudioName(f.name);
             }}
           />

@@ -233,11 +233,12 @@ export const api = {
   updateBranch: (branchId: number, patch: { name?: string; kind?: string }) =>
     request<Branch>(`/api/branches/${branchId}`, { ...json(patch), method: "PATCH" }),
   listNotes: (commitId: number) => request<Note[]>(`/api/commits/${commitId}/notes`),
-  addNote: (commitId: number, kind: NoteKind, text: string, audio: Blob | null, audioName = "note.webm") => {
+  addNote: (commitId: number, kind: NoteKind, text: string, audio: Blob | null, audioName = "note.webm", heard = "") => {
     const form = new FormData();
     form.append("kind", kind);
     if (text.trim()) form.append("text", text.trim());
     if (audio) form.append("audio", audio, audioName);
+    if (audio && heard.trim()) form.append("fallback_text", heard.trim());
     return request<Note>(`/api/commits/${commitId}/notes`, { method: "POST", body: form });
   },
   transcribeNote: (noteId: number) => request<Note>(`/api/notes/${noteId}/transcribe`, { method: "POST" }),

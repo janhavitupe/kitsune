@@ -11,6 +11,7 @@ from the working version. run() yields events for the UI as they happen.
 
 import json
 import logging
+import re
 import sqlite3
 import time
 from collections.abc import Iterator
@@ -198,7 +199,18 @@ def run(conn: sqlite3.Connection, repo_id: int, ask: str, start_commit: int | No
     try:
         plan = wonder.chat(conn, messages + [{"role": "user", "content": prompts.ASSISTANT_PLAN}])["content"]
     except Exception as e:
-        yield {"type": "error", "message": f"The assistant needs Muse Wonder, which is unavailable: {e}"}
+        log.info("Muse Wonder unavailable, following the ask with rules: %s", e)
+        steps, skipped = rule_steps(ask)
+        if not steps:
+            examples = "; ".join(f'"{x}"' for x in RULE_EXAMPLES)
+            yield {"type": "error", "message": f"Muse Wonder is unavailable right now. Without it I can follow simple asks like {examples}."}
+            return
+        lines = "\n".join(f"{i}. {st.describe}" for i, st in enumerate(steps, 1))
+        if skipped:
+            lines += "\nSkipping (needs Muse Wonder): " + "; ".join(f'"{x}"' for x in skipped)
+        yield {"type": "plan", "text": f"Muse Wonder is unavailable, so I'm following your ask step by step:\n{lines}"}
+        final = yield from run_rule_steps(r, steps)
+        yield _final(conn, r, final)
         return
     yield {"type": "plan", "text": plan}
     messages += [{"role": "assistant", "content": plan}, {"role": "user", "content": prompts.ASSISTANT_GO}]
@@ -234,9 +246,122 @@ def run(conn: sqlite3.Connection, repo_id: int, ask: str, start_commit: int | No
                     yield {"type": "tool_result", "step": calls, "name": c["name"], "error": str(e)}
             messages.append({"role": "tool", "tool_call_id": c["id"], "content": _dumps(result)})
 
+    yield _final(conn, r, final)
+
+
+def _final(conn: sqlite3.Connection, r: Run, text: str) -> dict:
     branch = conn.execute("SELECT name FROM branches WHERE id = ?", (r.branch_id,)).fetchone()[0] if r.branch_id else None
-    yield {"type": "final", "text": final, "created": r.created, "working_commit": r.working if r.created else None, "branch": branch}
+    return {"type": "final", "text": text, "created": r.created, "working_commit": r.working if r.created else None, "branch": branch}
 
 
 def _dumps(obj) -> str:
     return json.dumps(obj, default=str)
+
+
+# --- without Muse Wonder ---------------------------------------------------------------------------
+# Simple asks are split into clauses and each clause becomes one tool call, so the assistant still
+# works, with the same tools and the steps shown live, when the model is down or out of quota.
+
+RULE_EXAMPLES = [
+    "take the sky from v2 and warm it",
+    "what changed since v3, then try a moonlit variant",
+    'bring back the top-left area from v1 and call it "old patch"',
+]
+
+# Without segmentation, change areas are named by position ("top area"); map common words onto them.
+PLACE_WORDS = {
+    "top": ("sky", "skies", "cloud", "clouds", "sun", "moon", "stars", "ceiling", "upper"),
+    "bottom": ("ground", "grass", "floor", "water", "sea", "lake", "river", "road", "field", "lower"),
+    "left": (),
+    "right": (),
+    "center": ("middle", "centre"),
+}
+FILLER = re.compile(r"^(?:the|my|old|original|previous|earlier|that|this)\s+")
+MESSAGE = re.compile(r"\b(?:call it|name it)\s*:?\s*[\"“]([^\"”]+)[\"”]", re.I)
+CLAUSE_SPLIT = re.compile(r"\s*(?:,|;|\.(?!\d)|\bthen\b|\band\b)\s*", re.I)
+BRING_BACK = re.compile(r"(?:\b(?:take|bring back|bring|restore|use|get|keep|put back|reuse)\s+|^)(.+?)\s+from\s+v(\d+)\b")
+VARIANT_WORDS = re.compile(r"\b(try|a|an|variant|variation|alternative|option|version)\b")
+
+
+class Step:
+    def __init__(self, tool: str, args: dict, describe: str):
+        self.tool, self.args, self.describe = tool, args, describe
+
+
+def rule_steps(ask: str) -> tuple[list[Step], list[str]]:
+    """The steps for an ask, and the parts of it the rules can't follow."""
+    steps: list[Step] = []
+    skipped: list[str] = []
+    message = None
+    if m := MESSAGE.search(ask):
+        message = m.group(1).strip()
+        ask = ask[: m.start()] + ask[m.end() :]
+    for clause in CLAUSE_SPLIT.split(ask):
+        c = clause.strip().lower()
+        if not c:
+            continue
+        versions = re.findall(r"\bv(\d+)\b", c)
+        if versions and re.search(r"\b(what changed|changes?|compare|difference|diff)\b", c):
+            a = f"v{versions[0]}"
+            b = f"v{versions[1]}" if len(versions) > 1 else "working"
+            steps.append(Step("get_changes", {"from_version": a, "to_version": b},
+                              f"See what changed between {a} and {'the working version' if b == 'working' else b}"))
+        elif fm := BRING_BACK.search(c):
+            what, source = FILLER.sub("", fm.group(1).strip()), f"v{fm.group(2)}"
+            steps.append(Step("bring_back", {"source_version": source, "label": what}, f"Bring back the {what} from {source}"))
+        elif re.search(r"\b(try|variant|variation|alternative|option)\b", c) and explore.preset_for(c):
+            direction = " ".join(VARIANT_WORDS.sub(" ", c).split()) or c
+            steps.append(Step("try_variant", {"direction": direction}, f"Try a {direction} variation on a side branch"))
+        elif explore.preset_for(c):
+            steps.append(Step("adjust", {"instruction": c}, f"Adjust the colors: {c}"))
+        elif not re.match(r"(keep|leave)\b", c):  # "keep today's figure" is already the case
+            skipped.append(clause.strip())
+    if message:
+        steps.append(Step("set_message", {"message": message}, f'Name the result "{message}"'))
+    return steps[:MAX_TOOL_CALLS], skipped
+
+
+def resolve_label(r: Run, source_version: str, what: str) -> str:
+    """The changed region the artist means by `what`: a label sharing a word with it, or the one change
+    area in the place the word implies (sky -> top). Never a guess between several."""
+    labels = [x["label"] for x in r.get_changes(source_version, r.v(r.working))["regions"]]
+    if not labels:
+        raise ToolError(f"Nothing changed between {source_version} and the working version")
+    words = what.lower().replace("-", " ").split()
+    direct = [lb for lb in labels if any(w in lb.lower().replace("-", " ").split() for w in words if len(w) > 2)]
+    if len(direct) == 1:
+        return direct[0]
+    places = [p for p, synonyms in PLACE_WORDS.items() if p in words or any(s in words for s in synonyms)]
+    near = [lb for lb in labels if any(p in lb.lower().replace("-", " ").split() for p in places)]
+    if len(near) == 1:
+        return near[0]
+    raise ToolError(f"No changed region matches '{what}'. What changed since {source_version}: {', '.join(labels)}")
+
+
+def run_rule_steps(r: Run, steps: list[Step]) -> Iterator[dict]:
+    """Run the steps in order, yielding tool events. Returns the summary for the final event."""
+    done = []
+    for i, st in enumerate(steps, 1):
+        args = dict(st.args)
+        if args.get("to_version") == "working":
+            args["to_version"] = r.v(r.working)
+        called = False
+        try:
+            if st.tool == "bring_back":
+                args["label"] = resolve_label(r, args["source_version"], args["label"])
+            yield {"type": "tool_call", "step": i, "name": st.tool, "arguments": args}
+            called = True
+            result = r.call(st.tool, args)
+        except ToolError as e:
+            if not called:
+                yield {"type": "tool_call", "step": i, "name": st.tool, "arguments": args}
+            yield {"type": "tool_result", "step": i, "name": st.tool, "error": str(e)}
+            done.append(f"couldn't {st.describe[0].lower()}{st.describe[1:]}: {e}")
+            continue
+        yield {"type": "tool_result", "step": i, "name": st.tool, "result": result}
+        made = f" ({result['version']})" if st.tool != "set_message" and "version" in result else ""
+        done.append(f"{st.describe[0].lower()}{st.describe[1:]}{made}")
+    text = ("Done: " + "; then ".join(done) + ".") if done else "Nothing to do."
+    if r.created:
+        text += " Your original branch is untouched; the new versions are on their own branch."
+    return text

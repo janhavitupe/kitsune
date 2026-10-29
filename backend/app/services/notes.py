@@ -1,7 +1,7 @@
 """Notes pinned to a version (M4): typed or recorded, the artist's own or a client's feedback.
 
-Audio is transcribed by Muse Voice Transcribe. Without the model the note is still saved with its
-audio, and can be transcribed later. Long notes get a one-line (artist) or bullet-list (client)
+Audio is transcribed by Muse Voice Transcribe. Without the model the note keeps the browser's own
+transcript if it sent one, and the recording can be transcribed again later. Long notes get a one-line (artist) or bullet-list (client)
 summary from Muse Spark.
 """
 
@@ -54,7 +54,7 @@ def _transcribe(conn: sqlite3.Connection, audio: bytes, filename: str) -> str | 
 
 def add(
     conn: sqlite3.Connection, commit_id: int, kind: str, text: str | None = None,
-    audio: bytes | None = None, filename: str | None = None,
+    audio: bytes | None = None, filename: str | None = None, fallback_text: str | None = None,
 ) -> int:
     if kind not in KINDS:
         raise NoteError(f"kind must be one of {', '.join(KINDS)}")
@@ -74,7 +74,7 @@ def add(
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(audio)
         # A typed note that comes with audio keeps the typed text.
-        text = text or _transcribe(conn, audio, PurePath(audio_path).name)
+        text = text or _transcribe(conn, audio, PurePath(audio_path).name) or (fallback_text or "").strip()[:5000] or None
 
     note_id = conn.execute(
         "INSERT INTO voice_notes (commit_id, kind, audio_path, transcript, summary, created_at) VALUES (?, ?, ?, ?, ?, ?)",

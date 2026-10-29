@@ -31,14 +31,17 @@ def add_note(
     kind: str = Form("artist"),
     text: str | None = Form(None),
     audio: UploadFile | None = File(None),
+    fallback_text: str | None = Form(None),
     conn: sqlite3.Connection = Depends(get_db),
 ):
-    """Pin a note to a version: typed text, a recording (transcribed), or both."""
+    """Pin a note to a version: typed text, a recording (transcribed), or both. `fallback_text` is the
+    browser's own transcript of the recording, kept only if Muse Voice Transcribe can't transcribe it."""
     get_commit_or_404(conn, commit_id)
     try:
         note_id = notes.add(
             conn, commit_id, kind, text=text,
             audio=audio.file.read() if audio else None, filename=audio.filename if audio else None,
+            fallback_text=fallback_text,
         )
     except notes.NoteError as e:
         raise HTTPException(e.status_code, str(e)) from e

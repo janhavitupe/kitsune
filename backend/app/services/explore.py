@@ -99,10 +99,24 @@ def _branch_name(conn: sqlite3.Connection, repo_id: int, direction: str) -> str:
     return name
 
 
+def _brighter(lab: np.ndarray) -> np.ndarray:
+    out = lab.copy()
+    out[..., 0] = np.clip(out[..., 0] * 1.08 + 6, 0, 100)
+    return out
+
+
+def _darker(lab: np.ndarray) -> np.ndarray:
+    out = lab.copy()
+    out[..., 0] *= 0.85
+    return out
+
+
 PRESET_WORDS: list[tuple[tuple[str, ...], Callable[[np.ndarray], np.ndarray]]] = [
     (("warm", "golden", "sunset", "dusk", "sunny", "orange"), _golden_hour),
     (("cool", "cold", "moon", "night", "blue", "icy"), _moonlit),
     (("muted", "overcast", "desaturat", "grey", "gray", "foggy", "soft"), _overcast),
+    (("bright", "lighter", "lighten"), _brighter),
+    (("dark", "dim", "mood"), _darker),
 ]
 
 

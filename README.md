@@ -23,7 +23,7 @@ Save versions of a painting, branch to try ideas, and see exactly what changed b
 | 📖 | **Process story**: the history as a portfolio breakdown | **Muse Wonder** |
 | 🔒 | **Private mode**: captions and search never leave your own model endpoint | Open weights (Muse Spark Open) on **Baseten**, back-filled with **Modal**; **Fireworks** as fallback |
 
-Every AI feature has an honest fallback, so nothing breaks when a model is slow or offline: messages fall back to the measured summary, search to rules, explore to color-space presets, the story to one assembled from the history. Every model result is cached by its inputs, and `AI_OFFLINE=1` replays the demo with no model calls at all.
+Every AI feature has an honest fallback, so nothing breaks when a model is slow or offline: messages fall back to the measured summary, search to rules, explore to color-space presets, the story to one assembled from the history, the assistant to a rule-based planner that runs simple asks ("take the sky from v2 and warm it") with the same tools, and voice notes to the browser's own speech recognition. Every model result is cached by its inputs, and `AI_OFFLINE=1` replays the demo with no model calls at all.
 
 **Works next to any paint app.** The `kitsune` command line tracks the PNG your app exports, like git tracks a file: `commit`, `branch`, `switch`, `diff`, `merge`, `pick sky --from v3`, and `watch` to commit every time you save. It talks to the same backend, so the browser shows the same history.
 

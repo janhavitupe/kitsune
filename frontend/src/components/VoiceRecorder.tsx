@@ -4,7 +4,31 @@ import { cx } from "../lib/format";
 const MAX_SECONDS = 120;
 
 interface Props {
-  onRecorded: (audio: Blob | null) => void;
+  /** `heard` is the browser's own transcript (Chrome, Edge, Safari), sent as a fallback for Voice Transcribe. */
+  onRecorded: (audio: Blob | null, heard: string) => void;
+}
+
+// The Web Speech API isn't in TypeScript's DOM types yet; this is the part we use.
+interface Recognition {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  onresult: ((e: { results: ArrayLike<{ isFinal: boolean; 0: { transcript: string } }> }) => void) | null;
+  onerror: (() => void) | null;
+  start: () => void;
+  stop: () => void;
+}
+type RecognitionCtor = new () => Recognition;
+
+function speechRecognition(): Recognition | null {
+  const w = window as unknown as { SpeechRecognition?: RecognitionCtor; webkitSpeechRecognition?: RecognitionCtor };
+  const Ctor = w.SpeechRecognition ?? w.webkitSpeechRecognition;
+  if (!Ctor) return null;
+  const r = new Ctor();
+  r.continuous = true;
+  r.interimResults = true;
+  r.lang = navigator.language || "en-US";
+  return r;
 }
 
 /** Record a voice note in the browser (MediaRecorder, webm/opus), capped at two minutes. */
@@ -14,9 +38,12 @@ export default function VoiceRecorder({ onRecorded }: Props) {
   const [url, setUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const recorder = useRef<MediaRecorder | null>(null);
+  const recognition = useRef<Recognition | null>(null);
+  const [heard, setHeard] = useState("");
 
   useEffect(() => () => {
     recorder.current?.stream.getTracks().forEach((t) => t.stop());
+    recognition.current?.stop();
     if (url) URL.revokeObjectURL(url);
   }, [url]);
 
@@ -37,16 +64,34 @@ export default function VoiceRecorder({ onRecorded }: Props) {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const rec = new MediaRecorder(stream);
       const chunks: Blob[] = [];
+      let transcript = "";
+      const speech = speechRecognition();
+      if (speech) {
+        speech.onresult = (e) => {
+          transcript = Array.from(e.results, (r) => r[0].transcript).join(" ").replace(/\s+/g, " ").trim();
+          setHeard(transcript);
+        };
+        speech.onerror = () => {}; // no transcript is fine; the recording is what matters
+        try {
+          speech.start();
+          recognition.current = speech;
+        } catch {
+          recognition.current = null;
+        }
+      }
       rec.ondataavailable = (e) => chunks.push(e.data);
       rec.onstop = () => {
         stream.getTracks().forEach((t) => t.stop());
+        recognition.current?.stop();
         const blob = new Blob(chunks, { type: rec.mimeType || "audio/webm" });
         setUrl(URL.createObjectURL(blob));
         setState("done");
-        onRecorded(blob);
+        // Recognition delivers its last words just after stop(), so read them a moment later.
+        setTimeout(() => onRecorded(blob, transcript), 400);
       };
       recorder.current = rec;
       rec.start();
+      setHeard("");
       setSeconds(0);
       setState("recording");
     } catch {
@@ -56,8 +101,9 @@ export default function VoiceRecorder({ onRecorded }: Props) {
 
   const reset = () => {
     setUrl(null);
+    setHeard("");
     setState("idle");
-    onRecorded(null);
+    onRecorded(null, "");
   };
 
   return (
@@ -84,6 +130,11 @@ export default function VoiceRecorder({ onRecorded }: Props) {
           </button>
         )}
       </div>
+      {heard && (
+        <p className="text-xs italic text-zinc-400" title="Your browser's transcript, used if Voice Transcribe is unavailable">
+          Heard: “{heard}”
+        </p>
+      )}
       {url && <audio src={url} controls className="h-8 w-full" />}
       {error && <p className="text-xs text-red-400">{error}</p>}
     </div>

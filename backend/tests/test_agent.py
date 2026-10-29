@@ -98,10 +98,51 @@ def test_json_tool_calls_in_text_work_too(client, repo, upload, monkeypatch):
     assert events[2]["result"]["working_version"] == "v2"
 
 
-def test_without_wonder_the_assistant_says_so(client, repo, upload):
+def test_without_wonder_simple_asks_still_run(client, conn, repo, upload):
+    v1, v2, label = two_versions(client, repo, upload)
+    events = run(client, repo, 'Take the sky from v1 and warm it, then call it "day sky, warmer"')
+
+    assert events[0]["type"] == "plan" and "Muse Wonder is unavailable" in events[0]["text"]
+    calls = [(e["name"], e["arguments"]) for e in events if e["type"] == "tool_call"]
+    assert calls == [
+        ("bring_back", {"source_version": "v1", "label": label}),  # "sky" found the changed area by place
+        ("adjust", {"instruction": "warm it"}),
+        ("set_message", {"message": "day sky, warmer"}),
+    ]
+    final = events[-1]
+    assert final["type"] == "final" and len(final["created"]) == 2 and final["branch"].startswith("assistant/")
+    picked, adjusted = (client.get(f"/api/commits/{i}").json() for i in final["created"])
+    assert adjusted["parent_id"] == picked["id"] and adjusted["message"] == "day sky, warmer"
+    a = np.asarray(storage.load_rgb(conn, v1["blob_sha"]))
+    b = np.asarray(storage.load_rgb(conn, picked["blob_sha"]))
+    assert np.array_equal(a[40, 40], b[40, 40])
+    # main is untouched
+    branches = {b["name"]: b for b in client.get(f"/api/repos/{repo['id']}").json()["branches"]}
+    assert branches["main"]["head_commit_id"] == v2["id"]
+
+
+def test_without_wonder_compare_and_variant(client, repo, upload):
     two_versions(client, repo, upload)
-    (event,) = run(client, repo)
-    assert event["type"] == "error" and "Muse Wonder" in event["message"]
+    events = run(client, repo, "What changed since v1, then try a moonlit variant, and add a dragon")
+    assert 'Skipping (needs Muse Wonder): "add a dragon"' in events[0]["text"]
+    calls = [(e["name"], e["arguments"]) for e in events if e["type"] == "tool_call"]
+    assert calls == [("get_changes", {"from_version": "v1", "to_version": "v2"}), ("try_variant", {"direction": "moonlit"})]
+    assert all("error" not in e for e in events if e["type"] == "tool_result")
+    assert len(events[-1]["created"]) == 1
+
+
+def test_without_wonder_an_unknown_region_is_refused_not_guessed(client, repo, upload):
+    two_versions(client, repo, upload)
+    events = run(client, repo, "Bring back the hair from v1")
+    (result,) = [e for e in events if e["type"] == "tool_result"]
+    assert "No changed region matches 'hair'" in result["error"]
+    assert events[-1]["created"] == []
+
+
+def test_without_wonder_an_ask_it_cant_follow_says_so(client, repo, upload):
+    two_versions(client, repo, upload)
+    (event,) = run(client, repo, "Make it pop")
+    assert event["type"] == "error" and "Muse Wonder is unavailable" in event["message"] and "take the sky from v2" in event["message"]
 
 
 def test_empty_repo(client, repo):

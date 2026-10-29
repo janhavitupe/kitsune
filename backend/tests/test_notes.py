@@ -72,3 +72,17 @@ def test_errors_and_delete(client, repo, upload):
     assert client.delete(f"/api/notes/{note['id']}").status_code == 204
     assert client.get(f"/api/commits/{v1['id']}").json()["note_count"] == 0
     assert client.delete(f"/api/notes/{note['id']}").status_code == 404
+
+
+def test_browser_transcript_is_only_a_fallback(client, repo, upload, monkeypatch):
+    v1 = upload(repo["id"], scene())
+    # No Voice Transcribe: the browser's transcript is kept, and the note is searchable by it.
+    r = client.post(f"/api/commits/{v1['id']}/notes", data={"kind": "artist", "fallback_text": "darkened the hills"},
+                    files={"audio": ("note.webm", b"abc", "audio/webm")})
+    assert r.json()["transcript"] == "darkened the hills"
+    assert [h["seq"] for h in client.get(f"/api/repos/{repo['id']}/search?q=hills").json()["results"]] == [1]
+    # With Voice Transcribe, the model's transcript wins.
+    monkeypatch.setattr(voice, "model_api", lambda: fake_voice("Darkened the hills."))
+    r = client.post(f"/api/commits/{v1['id']}/notes", data={"kind": "artist", "fallback_text": "dark and the hills"},
+                    files={"audio": ("note.webm", b"abcd", "audio/webm")})
+    assert r.json()["transcript"] == "Darkened the hills."
