@@ -9,6 +9,7 @@ planning/
 # Local data: blobs, masks, thumbnails, SQLite, AI cache, raw API probe output
 data/
 scripts/probe_out/
+demo-art/
 *.db
 *.sqlite
 *.sqlite3

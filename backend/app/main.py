@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app import db, ratelimit
+from app import db, jobs, ratelimit
 from app.config import settings
 from app.routers import assistant, blobs, branches, cherrypick, commits, diffs, explore, merges, notes, repos
 
@@ -14,6 +14,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     db.init_db()
+    jobs.resume_unfinished()
     yield
 
 

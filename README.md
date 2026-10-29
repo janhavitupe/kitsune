@@ -78,7 +78,8 @@ npm run dev                       # http://localhost:5173
 Data goes to `data/` at the repo root. Load a demo history from a folder of images:
 
 ```bash
-backend/.venv/Scripts/python scripts/seed_demo.py path/to/art      # see the script for the kitsune-demo.json format
+backend/.venv/Scripts/python scripts/make_demo_art.py demo-art      # placeholder series + kitsune-demo.json, if you have no art yet
+backend/.venv/Scripts/python scripts/seed_demo.py demo-art           # or your own folder; see the script for the manifest format
 ```
 
 ### The `kitsune` CLI

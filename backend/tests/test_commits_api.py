@@ -88,3 +88,18 @@ def test_blob_endpoints(client, repo, upload):
     assert client.get(v1["thumb_url"]).headers["content-type"] == "image/webp"
     assert client.get("/api/blobs/" + "0" * 64).status_code == 404
     assert client.get("/api/blobs/not-a-sha").status_code == 422
+
+
+def test_analysis_cut_off_by_a_restart_is_resumed(client, conn, repo, upload, monkeypatch):
+    import threading
+
+    from app import jobs
+
+    v1 = upload(repo["id"], (10, 0, 0))
+    conn.execute("UPDATE commits SET analysis_status = 'running' WHERE id = ?", (v1["id"],))
+    conn.commit()
+    started = []
+    monkeypatch.setattr(threading, "Thread", lambda target, **kw: started.append(target) or type("T", (), {"start": lambda s: None})())
+    assert jobs.resume_unfinished() == [v1["id"]]
+    started[0]()  # run what would have run in the background
+    assert client.get(f"/api/commits/{v1['id']}").json()["analysis_status"] == "done"

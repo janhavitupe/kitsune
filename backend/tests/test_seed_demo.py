@@ -61,3 +61,20 @@ def test_bad_manifests(client, art, tmp_path):
     empty.mkdir()
     with pytest.raises(seed_demo.SeedError, match="No images"):
         seed_demo.seed(client, empty, log=lambda *_: None)
+
+
+def test_generated_demo_art_seeds_the_whole_story(client, tmp_path):
+    spec = importlib.util.spec_from_file_location("make_demo_art", SCRIPT.parent / "make_demo_art.py")
+    art = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(art)
+    folder = tmp_path / "demo-art"
+    folder.mkdir()
+    for name, kw in art.VERSIONS.items():
+        art.paint(**kw).save(folder / name)
+
+    rid = seed_demo.seed(client, folder, art.MANIFEST, log=lambda *_: None)
+    commits = {c["seq"]: c for c in client.get(f"/api/repos/{rid}/commits").json()}
+    assert len(commits) == 6 and commits[6]["merge_parent_id"] and commits[5]["branch"] == "red-coat"
+    # Each step changes only what it says: the dusk is the sky, the lantern and coat don't conflict.
+    assert [r["label"] for r in client.get(f"/api/diff?from={commits[2]['id']}&to={commits[3]['id']}").json()["regions"]] == ["top area"]
+    assert "Merged red-coat" in commits[6]["message"]
