@@ -9,7 +9,9 @@ interface Props {
   onUploaded: (c: Commit) => void;
 }
 
-const ACCEPT = "image/png,image/jpeg";
+const ACCEPT = "image/png,image/jpeg,.psd,.kra,.ora";
+// Paint-app files are read by the backend (their flattened image); the browser can't preview them.
+const previewable = (f: File) => f.type === "image/png" || f.type === "image/jpeg";
 
 export default function UploadDialog({ repoId, branch, onClose, onUploaded }: Props) {
   const [file, setFile] = useState<File | null>(null);
@@ -20,7 +22,10 @@ export default function UploadDialog({ repoId, branch, onClose, onUploaded }: Pr
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!file) return;
+    if (!file || !previewable(file)) {
+      setPreview(null);
+      return;
+    }
     const url = URL.createObjectURL(file);
     setPreview(url);
     return () => URL.revokeObjectURL(url);
@@ -78,11 +83,17 @@ export default function UploadDialog({ repoId, branch, onClose, onUploaded }: Pr
         >
           {preview ? (
             <img src={preview} alt="Selected file" className="h-full w-full object-contain" />
+          ) : file ? (
+            <span className="px-4 text-center text-sm text-zinc-300">
+              {file.name}
+              <br />
+              <span className="text-zinc-500">The flattened image will be used</span>
+            </span>
           ) : (
             <span className="px-4 text-center text-sm text-zinc-400">
-              Drop a PNG or JPG here, or click to choose
+              Drop an image here, or click to choose
               <br />
-              <span className="text-zinc-500">Flatten PSD files to PNG first</span>
+              <span className="text-zinc-500">PNG, JPG, Photoshop .psd, Krita .kra or .ora</span>
             </span>
           )}
           <input type="file" accept={ACCEPT} className="sr-only" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />

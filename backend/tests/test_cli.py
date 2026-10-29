@@ -1,5 +1,7 @@
+import io
 import json
 import sys
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -137,10 +139,10 @@ def test_watch_commits_after_a_save(studio):
 def test_errors(client, studio, tmp_path, monkeypatch):
     with pytest.raises(cli.CliError, match="already"):
         cli.Kitsune.init(client, studio.ws.root, studio.ws.path, None, None, "b", "w", None, out=lambda *_: None)
-    psd = tmp_path / "x.psd"
-    psd.write_bytes(b"")
-    with pytest.raises(cli.CliError, match="PNG or JPG"):
-        cli.Kitsune.init(client, tmp_path, psd, None, None, "b", "w", None, out=lambda *_: None)
+    xcf = tmp_path / "x.xcf"
+    xcf.write_bytes(b"")
+    with pytest.raises(cli.CliError, match="reads .psd, .kra"):
+        cli.Kitsune.init(client, tmp_path, xcf, None, None, "b", "w", None, out=lambda *_: None)
     with pytest.raises(cli.CliError, match="No version v9"):
         studio.version("v9")
     with pytest.raises(cli.CliError, match="isn't a version"):
@@ -154,3 +156,32 @@ def test_errors(client, studio, tmp_path, monkeypatch):
     empty.mkdir()
     monkeypatch.chdir(empty)
     assert cli.main(["status"]) == 1
+
+
+def test_tracking_a_krita_file(client, tmp_path):
+    root = tmp_path / "kra"
+    root.mkdir()
+    kra = root / "girl.kra"
+
+    def save(*patches):
+        img = scene()
+        d = ImageDraw.Draw(img)
+        for box, color in patches:
+            d.rectangle(box, fill=color)
+        out = io.BytesIO()
+        img.save(out, format="PNG")
+        with zipfile.ZipFile(kra, "w") as z:
+            z.writestr("mimetype", "application/x-krita")
+            z.writestr("mergedimage.png", out.getvalue())
+
+    save()
+    lines = []
+    k = cli.Kitsune.init(client, root, kra, None, None, "http://testserver", "http://web", None, out=lines.append)
+    save((TOP_LEFT, WHITE))
+    assert k.commit(None)["seq"] == 2
+    assert [r["label"] for r in k.diff(None, None)["regions"]] == ["top-left area"]
+
+    k.branch("alt", "v1")
+    before = kra.read_bytes()
+    k.switch("alt")
+    assert kra.read_bytes() == before and "left as it is" in lines[-1]  # layers are never overwritten

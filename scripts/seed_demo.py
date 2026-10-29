@@ -5,7 +5,7 @@ recording.
     backend/.venv/Scripts/python scripts/seed_demo.py path/to/art
     backend/.venv/Scripts/python scripts/seed_demo.py path/to/art --backend https://kitsune-api.onrender.com
 
-Without a manifest, every PNG/JPG in the folder is committed to main in file-name order. With
+Without a manifest, every image (PNG, JPG, PSD, KRA, ORA) in the folder is committed to main in file-name order. With
 `kitsune-demo.json` in the folder, it says exactly what happens:
 
     {
@@ -32,7 +32,7 @@ from pathlib import Path
 
 import httpx
 
-IMAGE_TYPES = {".png", ".jpg", ".jpeg"}
+IMAGE_TYPES = {".png", ".jpg", ".jpeg", ".psd", ".kra", ".ora"}
 
 
 class SeedError(RuntimeError):

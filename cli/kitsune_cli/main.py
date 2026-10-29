@@ -1,6 +1,7 @@
 """kitsune: version control for artwork from the terminal, next to any paint app.
 
-Point Kitsune at the image your paint app saves or exports (PNG or JPG), then commit, branch, diff,
+Point Kitsune at the file your paint app saves (Photoshop .psd, Krita .kra, OpenRaster .ora) or an
+exported PNG/JPG, then commit, branch, diff,
 merge and bring regions back like you would with git. Everything is stored in a Kitsune backend;
 the browser UI shows the same history.
 
@@ -35,7 +36,7 @@ from pathlib import Path
 import httpx
 
 STATE_DIR = ".kitsune"
-IMAGE_TYPES = {".png", ".jpg", ".jpeg"}
+IMAGE_TYPES = {".png", ".jpg", ".jpeg", ".psd", ".kra", ".ora"}
 DEFAULT_BACKEND = "http://127.0.0.1:8000"
 DEFAULT_WEB = "http://localhost:5173"
 
@@ -169,7 +170,7 @@ class Kitsune:
         if (root / STATE_DIR / "config.json").exists():
             raise CliError(f"{root} is already a Kitsune folder")
         if image.suffix.lower() not in IMAGE_TYPES:
-            raise CliError("Track the PNG or JPG your paint app exports (Kitsune can't read .psd/.kra/.procreate yet)")
+            raise CliError("Kitsune reads .psd, .kra, .ora, .png and .jpg. Track one of those, or export a PNG from your paint app.")
         if not image.exists():
             raise CliError(f"{image} doesn't exist yet. Export it from your paint app first.")
         try:
@@ -289,11 +290,15 @@ class Kitsune:
         if ws.dirty() and not force:
             raise CliError("The file has changes that aren't committed. Commit them, or switch with --force to drop them.")
         ws.branch = name
-        if head is not None:
+        if head is None:
+            self.out(f"On branch {name} (no versions yet).")
+        elif ws.path.suffix.lower() == ".png":
             ws.synced[name] = self._load_into_file(head)
             self.out(f"On branch {name}. Loaded v{head['seq']} into {ws.file}; reload it in your paint app.")
         else:
-            self.out(f"On branch {name} (no versions yet).")
+            # A .psd or .kra holds layers Kitsune doesn't have, so the file is left alone.
+            self.out(f"On branch {name} (latest v{head['seq']}). {ws.file} was left as it is: Kitsune only keeps the flattened "
+                     f"image, so it can't rebuild your layers. `kitsune checkout v{head['seq']} -o v{head['seq']}.png` to see it.")
         ws.save()
 
     def checkout(self, ref: str, output: Path | None, force: bool = False) -> None:

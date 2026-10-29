@@ -1,6 +1,7 @@
 """Content-addressed blob store.
 
-Every upload is normalized to an RGB PNG (alpha flattened onto white) and stored under the
+Uploads can be PNG, JPG, or a paint app's own file (Photoshop .psd, Krita .kra, OpenRaster .ora),
+in which case its flattened image is used. Every upload is normalized to an RGB PNG (alpha flattened onto white) and stored under the
 SHA-256 of its decoded pixels, sharded like Git: data/blobs/ab/cdef....png. Hashing pixels rather
 than file bytes means the same picture saved as a JPG, or as a PNG by a different app, is still
 stored once. Thumbnails live next to them under data/thumbs/.
@@ -11,6 +12,7 @@ import hashlib
 import io
 import os
 import sqlite3
+import zipfile
 from pathlib import Path
 
 from PIL import Image, ImageOps, UnidentifiedImageError
@@ -44,6 +46,28 @@ def _write_atomic(rel: str, data: bytes) -> None:
     os.replace(tmp, path)
 
 
+def _flattened(data: bytes) -> bytes:
+    """The flattened image inside a Krita (.kra) or OpenRaster (.ora, MyPaint/GIMP/Krita) file: both
+    are zips with the full-size composite at mergedimage.png. Other uploads are returned as they are;
+    Pillow reads a Photoshop file's composite itself."""
+    if not data.startswith(b"PK\x03\x04"):
+        return data
+    try:
+        with zipfile.ZipFile(io.BytesIO(data)) as z:
+            try:
+                info = z.getinfo("mergedimage.png")
+            except KeyError:
+                raise ImageRejected("This file has no flattened image inside. Export a PNG from your paint app.") from None
+            if info.file_size > settings.max_upload_mb * 1024 * 1024 * 4:  # PNG inflates; still guard against zip bombs
+                raise ImageRejected("The image inside this file is too large", status_code=413)
+            return z.read(info)
+    except zipfile.BadZipFile as e:
+        raise ImageRejected(UNREADABLE) from e
+
+
+UNREADABLE = "Not a readable image. Upload a PNG, JPG, PSD (Photoshop), KRA (Krita) or ORA file."
+
+
 def decode(data: bytes) -> tuple[Image.Image, bool]:
     """Decode an upload to RGB, or raise ImageRejected.
 
@@ -69,7 +93,7 @@ def decode(data: bytes) -> tuple[Image.Image, bool]:
         else:
             img = img.convert("RGB")
     except (UnidentifiedImageError, Image.DecompressionBombError, OSError) as e:
-        raise ImageRejected("Not a readable image. Upload a PNG or JPG.") from e
+        raise ImageRejected(UNREADABLE) from e
     return img, passthrough
 
 
@@ -114,6 +138,7 @@ def data_uri(conn: sqlite3.Connection, sha: str, max_side: int = 1024) -> str:
 
 def put_image(conn: sqlite3.Connection, data: bytes) -> sqlite3.Row:
     """Store an uploaded image (deduplicated) and return its blobs row."""
+    data = _flattened(data)  # before decoding, so a passthrough stores the inner PNG, not the .kra
     img, passthrough = decode(data)
     sha = pixel_sha(img)
 
