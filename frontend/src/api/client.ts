@@ -242,6 +242,9 @@ export const api = {
     return request<Note>(`/api/commits/${commitId}/notes`, { method: "POST", body: form });
   },
   transcribeNote: (noteId: number) => request<Note>(`/api/notes/${noteId}/transcribe`, { method: "POST" }),
+  deleteCommit: async (commitId: number) => {
+    await send(`/api/commits/${commitId}`, { method: "DELETE" });
+  },
   deleteNote: async (noteId: number) => {
     await send(`/api/notes/${noteId}`, { method: "DELETE" });
   },

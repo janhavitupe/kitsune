@@ -67,3 +67,16 @@ def test_bring_back_the_lantern_after_it_was_painted_over(client, conn, story, u
     assert out["message"] == "Brought back the lantern from v4"  # found by v4's message
     assert same(conn, out, c[4], LANTERN)  # copied from v4
     assert same(conn, out, v7, COAT) and same(conn, out, v7, SKY)  # the rest is v7's
+
+
+def test_assistant_works_on_the_version_you_picked(client, conn, story):
+    rid, c = story
+    first = ask(client, rid, "Take the day sky from v2")
+    assert first["branch"].startswith("assistant/")
+    # Asked again from that version: the result follows it on the same branch, main is untouched.
+    r = client.post(f"/api/repos/{rid}/assistant", json={"ask": "make it warmer", "start_commit": first["id"]})
+    final = [json.loads(line[6:]) for line in r.text.splitlines() if line.startswith("data: ")][-1]
+    second = client.get(f"/api/commits/{final['created'][-1]}").json()
+    assert second["parent_id"] == first["id"] and second["branch"] == first["branch"]
+    main = next(b for b in client.get(f"/api/repos/{rid}").json()["branches"] if b["name"] == "main")
+    assert main["head_commit_id"] == c[6]["id"]

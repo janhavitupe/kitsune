@@ -251,6 +251,10 @@ export default function RepoPage({ repoId, onBack }: Props) {
             onBranchCreated={onBranchCreated}
             onExplore={() => setExploring(a)}
             onNotesChanged={refresh}
+            onDeleted={() => {
+              setSelected(a.parent_id ? [a.parent_id] : []);
+              refresh();
+            }}
           />
         ) : null}
       </main>
@@ -260,6 +264,7 @@ export default function RepoPage({ repoId, onBack }: Props) {
           repoId={repo.id}
           onClose={() => setAssistantOpen(false)}
           onChanged={refresh}
+          working={picked[picked.length - 1]}
           onOpen={(id) => {
             const c = byId.get(id);
             if (c) setBranch(c.branch);

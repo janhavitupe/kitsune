@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { api, assetUrl, type AssistantEvent } from "../api/client";
+import { api, assetUrl, type AssistantEvent, type Commit } from "../api/client";
 import { cx } from "../lib/format";
 
 interface Props {
@@ -7,6 +7,7 @@ interface Props {
   onClose: () => void;
   onChanged: () => void; // new versions were made
   onOpen: (commitId: number) => void;
+  working?: Commit; // the version the assistant starts from; the head of main if not given
 }
 
 const SUGGESTIONS = [
@@ -33,7 +34,7 @@ interface Step {
 }
 
 /** The studio assistant: an ask, its plan, every tool call as it runs, and the result. */
-export default function AssistantPanel({ repoId, onClose, onChanged, onOpen }: Props) {
+export default function AssistantPanel({ repoId, onClose, onChanged, onOpen, working }: Props) {
   const [ask, setAsk] = useState("");
   const [plan, setPlan] = useState<string | null>(null);
   const [steps, setSteps] = useState<Step[]>([]);
@@ -59,7 +60,7 @@ export default function AssistantPanel({ repoId, onClose, onChanged, onOpen }: P
           setFinal(e);
           if (e.created.length) onChanged();
         } else if (e.type === "error") setError(e.message);
-      });
+      }, working?.id);
     } catch (err) {
       setError((err as Error).message);
     }
@@ -77,7 +78,12 @@ export default function AssistantPanel({ repoId, onClose, onChanged, onOpen }: P
       aria-label="Studio assistant"
     >
       <div className="flex items-center justify-between border-b border-zinc-800 px-4 py-3">
-        <h2 className="font-semibold">Studio assistant</h2>
+        <div>
+          <h2 className="font-semibold">Studio assistant</h2>
+          <p className="text-xs text-zinc-400">
+            {working ? `Working on v${working.seq} (${working.branch})` : "Working on the latest version of main"}
+          </p>
+        </div>
         <button onClick={onClose} className="rounded-md px-2 py-1 text-sm text-zinc-400 hover:bg-zinc-800" aria-label="Close">
           ✕
         </button>

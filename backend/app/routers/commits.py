@@ -65,3 +65,12 @@ def retry_analysis(commit_id: int, background: BackgroundTasks, conn: sqlite3.Co
     conn.execute("UPDATE commits SET analysis_status = 'pending' WHERE id = ?", (commit_id,))
     background.add_task(jobs.run_analysis, commit_id)
     return get_commit_or_404(conn, commit_id)
+
+
+@router.delete("/commits/{commit_id}", status_code=204)
+def delete_commit(commit_id: int, conn: sqlite3.Connection = Depends(get_db)):
+    """Delete the latest version of a branch, when nothing is built on it."""
+    try:
+        commits.delete(conn, commit_id)
+    except commits.CannotDelete as e:
+        raise HTTPException(e.status_code, str(e)) from e

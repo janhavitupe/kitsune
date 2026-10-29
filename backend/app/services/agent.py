@@ -89,7 +89,16 @@ class Run:
         """Move the working version onto an assistant branch, so the original branch is untouched."""
         if self.branch_id is not None:
             return
-        base = "assistant/" + explore.slug(self.ask)[:32]
+        # Already the tip of an assistant branch: carry on there instead of starting another.
+        own = self.conn.execute(
+            "SELECT b.id FROM branches b JOIN commits c ON c.branch_id = b.id"
+            " WHERE c.id = ? AND b.head_commit_id = c.id AND b.name LIKE 'assistant/%'",
+            (self.working,),
+        ).fetchone()
+        if own:
+            self.branch_id = own[0]
+            return
+        base ="assistant/" + explore.slug(self.ask)[:32]
         name, n = base, 1
         while self.conn.execute("SELECT 1 FROM branches WHERE repo_id = ? AND name = ?", (self.repo_id, name)).fetchone():
             n += 1

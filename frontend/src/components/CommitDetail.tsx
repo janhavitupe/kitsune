@@ -13,10 +13,11 @@ interface Props {
   onBranchCreated: (name: string) => void;
   onExplore: () => void;
   onNotesChanged: () => void;
+  onDeleted: () => void;
 }
 
 export default function CommitDetail({
-  commit, parent, branches, onCompareWithParent, onPickSecond, onBranchCreated, onExplore, onNotesChanged,
+  commit, parent, branches, onCompareWithParent, onPickSecond, onBranchCreated, onExplore, onNotesChanged, onDeleted,
 }: Props) {
   const [branching, setBranching] = useState(false);
   const [name, setName] = useState("");
@@ -34,6 +35,19 @@ export default function CommitDetail({
       setName("");
       setError(null);
       onBranchCreated(name);
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  };
+
+  // Only the latest version of a branch can go; the server checks nothing else is built on it.
+  const isTip = branches.some((b) => b.name === commit.branch && b.head_commit_id === commit.id);
+  const remove = async () => {
+    if (!window.confirm(`Delete v${commit.seq}? Its image and notes are removed for good.`)) return;
+    try {
+      await api.deleteCommit(commit.id);
+      setError(null);
+      onDeleted();
     } catch (err) {
       setError((err as Error).message);
     }
@@ -111,6 +125,11 @@ export default function CommitDetail({
           <button onClick={onExplore} className="rounded-md border border-zinc-700 px-3 py-2 text-left text-sm hover:bg-zinc-900">
             Explore palettes…
           </button>
+          {isTip && (
+            <button onClick={remove} className="rounded-md border border-red-900 px-3 py-2 text-left text-sm text-red-400 hover:bg-red-950">
+              Delete this version
+            </button>
+          )}
           {error && <p className="text-sm text-red-400">{error}</p>}
         </div>
 
