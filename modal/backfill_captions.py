@@ -44,6 +44,7 @@ def caption(png: bytes, prompt: str) -> tuple[str, str]:
 
 @app.local_entrypoint()
 def main(repo: int, backend: str = "http://127.0.0.1:8000"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # model text on a Windows console
     import httpx
 
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
@@ -54,7 +55,7 @@ def main(repo: int, backend: str = "http://127.0.0.1:8000"):
     if not missing:
         print("Every version already has a caption.")
         return
-    print(f"Captioning {len(missing)} images on Modal…")
+    print(f"Captioning {len(missing)} images on Modal...")
     images = [api.get(m["image_url"]).raise_for_status().content for m in missing]
     for m, (text, model) in zip(missing, caption.starmap((png, CAPTION) for png in images), strict=True):
         api.post(f"/api/blobs/{m['blob_sha']}/captions", json={"caption": text, "model": model}).raise_for_status()

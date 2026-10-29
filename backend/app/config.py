@@ -27,6 +27,11 @@ class Settings(BaseSettings):
     ai_offline: bool = False  # serve only from ai_cache, never call models
     demo_password: str = ""
 
+    # Per-IP limits for the public demo (requests per minute)
+    rate_limit_enabled: bool = True
+    rate_limit_ai_per_min: int = 12
+    rate_limit_writes_per_min: int = 60
+
     # Upload limits
     max_upload_mb: int = 25
     max_side_px: int = 8000

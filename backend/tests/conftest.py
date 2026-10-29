@@ -4,7 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
 
-from app import db
+from app import db, ratelimit
 from app.ai import client as ai_client
 from app.config import settings
 
@@ -20,6 +20,8 @@ def data_dir(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "openweights_api_key", "")
     ai_client.model_api.cache_clear()
     ai_client.openweights.cache_clear()
+    monkeypatch.setattr(settings, "rate_limit_enabled", False)  # test_ratelimit turns it back on
+    ratelimit.reset()
     db.init_db()
     return settings.data_dir
 

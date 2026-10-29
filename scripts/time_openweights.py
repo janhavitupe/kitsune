@@ -37,6 +37,7 @@ def image(i: int) -> str:
 
 
 def main():
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # model text on a Windows console
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--base-url", default=settings.openweights_base_url)
     p.add_argument("--api-key", default=settings.openweights_api_key)

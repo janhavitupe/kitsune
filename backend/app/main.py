@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app import db
+from app import db, ratelimit
 from app.config import settings
 from app.routers import assistant, blobs, branches, cherrypick, commits, diffs, explore, merges, notes, repos
 
@@ -18,6 +18,8 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(title="Kitsune", version="0.1.0", lifespan=lifespan)
+app.middleware("http")(ratelimit.middleware)
+# Added last so it wraps everything: even a 429 carries CORS headers the browser can read.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origin_list,

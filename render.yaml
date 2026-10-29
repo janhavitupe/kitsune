@@ -1,0 +1,36 @@
+# Render blueprint for the Kitsune backend: New → Blueprint → pick this repo.
+# A persistent disk keeps images and the database across deploys; disks need a paid instance
+# (Starter). Secrets marked sync: false are asked for in the dashboard, never stored here.
+services:
+  - type: web
+    name: kitsune-api
+    runtime: python
+    rootDir: backend
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    # One process: SQLite, background jobs and the rate limiter all live in it.
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health
+    disk:
+      name: kitsune-data
+      mountPath: /var/data
+      sizeGB: 5
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.8
+      - key: DATA_DIR
+        value: /var/data
+      - key: CORS_ORIGINS # the Vercel URL, e.g. https://kitsune.vercel.app
+        sync: false
+      - key: MODEL_API_KEY
+        sync: false
+      - key: MODEL_API_BASE_URL
+        value: https://api.meta.ai/v1
+      - key: OPENWEIGHTS_BASE_URL
+        sync: false
+      - key: OPENWEIGHTS_API_KEY
+        sync: false
+      - key: OPENWEIGHTS_MODEL
+        sync: false
+      - key: AI_OFFLINE # set to 1 after warming the cache to replay the demo with no model calls
+        value: "0"
