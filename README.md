@@ -25,6 +25,8 @@ Save versions of a painting, branch to try ideas, and see exactly what changed b
 
 Every AI feature has an honest fallback, so nothing breaks when a model is slow or offline: messages fall back to the measured summary, search to rules, explore to color-space presets, the story to one assembled from the history. Every model result is cached by its inputs, and `AI_OFFLINE=1` replays the demo with no model calls at all.
 
+**Works next to any paint app.** The `kitsune` command line tracks the PNG your app exports, like git tracks a file: `commit`, `branch`, `switch`, `diff`, `merge`, `pick sky --from v3`, and `watch` to commit every time you save. It talks to the same backend, so the browser shows the same history.
+
 **History is append-only.** Cherry-picks, merges, explore variations and the assistant always make new versions; nothing is ever overwritten.
 
 ## Meta models and partners
@@ -79,6 +81,23 @@ Data goes to `data/` at the repo root. Load a demo history from a folder of imag
 backend/.venv/Scripts/python scripts/seed_demo.py path/to/art      # see the script for the kitsune-demo.json format
 ```
 
+### The `kitsune` CLI
+
+```bash
+pip install ./cli                  # or: backend/.venv/Scripts/pip install -e cli
+cd my-painting-folder
+kitsune init forest.png            # first version; state goes in .kitsune/
+kitsune commit                     # after saving in your paint app; Muse Spark writes the message
+kitsune branch dusk --from v1 && kitsune switch dusk   # loads that version into forest.png
+kitsune diff                       # named regions and how they changed
+kitsune merge dusk --take 0=source # conflicts are listed with their index
+kitsune pick "sky" --from v3       # bring a region back
+kitsune watch                      # commit on every save
+kitsune --help                     # everything else: status, log, checkout, note, search, open
+```
+
+Use `kitsune init forest.png --backend https://<render-url> --web https://<vercel-url>` for a deployed backend.
+
 ## Deploy
 
 **Backend on Render:** New → Blueprint → this repo. `render.yaml` sets up a Python web service with a 5 GB persistent disk (needs the Starter plan) and asks for `CORS_ORIGINS`, `MODEL_API_KEY` and the open-weights settings.
@@ -91,7 +110,7 @@ Before the demo: seed it (`--backend https://<render-url>`), click through every
 
 ```bash
 cd backend
-.venv/Scripts/python -m pytest        # 108 tests; model calls are faked, never real
+.venv/Scripts/python -m pytest        # 116 tests; model calls are faked, never real
 ```
 
 Other scripts: `scripts/probe_model_api.py` (check model ids and response shapes), `scripts/time_openweights.py` (Baseten vs Fireworks latency).
@@ -101,6 +120,7 @@ Other scripts: `scripts/probe_model_api.py` (check model ids and response shapes
 ```
 backend/   FastAPI: routers/, services/ (diff, segmentation, cherry-pick, merge, search, agent…), ai/ (one file per model)
 frontend/  React: timeline, compare + region overlay, notes, search, merge, explore, assistant, story
+cli/       the kitsune command line (one module, httpx only)
 modal/     Modal caption back-fill
 scripts/   probe, seed, timing
 ```
@@ -109,4 +129,5 @@ scripts/   probe, seed, timing
 
 - Flattened PNG/JPG only; PSD layers are future work.
 - A cherry-picked region is placed where it was; if the composition moved, it won't follow.
-- Next: a `kitsune` CLI and a "commit on save" watcher for any paint app, a Krita plugin, an iPad share-sheet shortcut, and shared repos for client review.
+- The CLI tracks an exported PNG/JPG; it can't read `.psd`, `.kra` or `.procreate` files.
+- Next: a Krita plugin, an iPad share-sheet shortcut, and shared repos for client review.
