@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { assetUrl, type Branch, type Commit } from "../api/client";
 import { commitTitle, cx } from "../lib/format";
 import StatusBadge from "./StatusBadge";
@@ -32,6 +33,18 @@ export default function Timeline({ branches, commits, selected, highlighted = []
     commits.map((c, i) => [c.id, { x: GUTTER + i * COL, y: PAD + (lane.get(c.branch_id) ?? 0) * ROW }]),
   );
   const width = GUTTER + commits.length * COL + PAD;
+
+  // Keep the version in play on screen: on a phone only two cards fit, and the newest are off to the right.
+  const scroller = useRef<HTMLDivElement>(null);
+  const focus = selected[selected.length - 1] ?? currentBranchHead;
+  const focusX = focus === null ? undefined : pos.get(focus)?.x;
+  useEffect(() => {
+    const el = scroller.current;
+    if (!el || focusX === undefined) return;
+    if (focusX >= el.scrollLeft && focusX + CARD_W <= el.scrollLeft + el.clientWidth) return;
+    el.scrollLeft = focusX + CARD_W / 2 - el.clientWidth / 2;
+  }, [focusX]);
+
   const height = PAD * 2 + branches.length * ROW - (ROW - CARD_H);
 
   /**
@@ -55,7 +68,7 @@ export default function Timeline({ branches, commits, selected, highlighted = []
   };
 
   return (
-    <div className="overflow-x-auto">
+    <div ref={scroller} className="overflow-x-auto">
       <div className="relative" style={{ width, height }}>
         <svg className="absolute inset-0" width={width} height={height} aria-hidden>
           {branches.map((b, i) => (

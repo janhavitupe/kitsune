@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, type Commit, type RepoDetail } from "../api/client";
 import AssistantPanel from "../components/AssistantPanel";
 import CommitDetail from "../components/CommitDetail";
@@ -10,6 +10,7 @@ import SearchBar from "../components/SearchBar";
 import StoryView from "../components/StoryView";
 import Timeline from "../components/Timeline";
 import UploadDialog from "../components/UploadDialog";
+import { cx } from "../lib/format";
 
 interface Props {
   repoId: number;
@@ -35,6 +36,7 @@ export default function RepoPage({ repoId, onBack }: Props) {
   const [storyOpen, setStoryOpen] = useState(false);
   const [found, setFound] = useState<number[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const timeline = useRef<HTMLElement>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -156,7 +158,7 @@ export default function RepoPage({ repoId, onBack }: Props) {
         <h1 className="truncate font-medium">{repo.name}</h1>
         <label
           className="flex cursor-pointer items-center gap-1.5 text-xs text-zinc-400"
-          title="Captions and search run on self-hosted open weights, never the hosted API. Segmentation and image edits still use the hosted API."
+          title="Captions and search run on self-hosted open weights, never the hosted API. Segmentation still uses the hosted API."
         >
           <input
             type="checkbox"
@@ -205,7 +207,7 @@ export default function RepoPage({ repoId, onBack }: Props) {
 
       {error && <p className="bg-red-950 px-4 py-2 text-sm text-red-300">{error}</p>}
 
-      <section className="border-b border-zinc-800">
+      <section ref={timeline} className="border-b border-zinc-800">
         {commits.length === 0 ? (
           <div className="px-4 py-16 text-center text-zinc-500">
             <p>No versions yet.</p>
@@ -224,10 +226,12 @@ export default function RepoPage({ repoId, onBack }: Props) {
               currentBranchHead={heads.get(branch) ?? null}
               onSelect={select}
             />
-            <p className="px-4 pb-3 text-xs text-zinc-500">
+            <p className={cx("px-4 pb-3 text-xs", pickingSecond ? "font-medium text-orange-400" : "text-zinc-500")}>
               {pickingSecond
                 ? "Pick a second version to compare."
-                : "Click a version to view it. Shift-click a second version to compare."}
+                : window.matchMedia("(pointer: coarse)").matches
+                  ? "Tap a version to view it, then use Compare with another version."
+                  : "Click a version to view it. Shift-click a second version to compare."}
             </p>
           </>
         )}
@@ -249,7 +253,10 @@ export default function RepoPage({ repoId, onBack }: Props) {
             parent={a.parent_id ? byId.get(a.parent_id) : undefined}
             branches={repo.branches}
             onCompareWithParent={() => a.parent_id && setSelected([a.parent_id, a.id])}
-            onPickSecond={() => setPickingSecond(true)}
+            onPickSecond={() => {
+              setPickingSecond(true);
+              timeline.current?.scrollIntoView(); // on a phone the timeline is far above this button
+            }}
             onBranchCreated={onBranchCreated}
             onExplore={() => setExploring(a)}
             onNotesChanged={refresh}

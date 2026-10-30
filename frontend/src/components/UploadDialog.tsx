@@ -91,7 +91,7 @@ export default function UploadDialog({ repoId, branch, onClose, onUploaded }: Pr
             </span>
           ) : (
             <span className="px-4 text-center text-sm text-zinc-400">
-              Drop an image here, or click to choose
+              Drop an image here, or choose a file
               <br />
               <span className="text-zinc-500">PNG, JPG, Photoshop .psd, Krita .kra or .ora</span>
             </span>
