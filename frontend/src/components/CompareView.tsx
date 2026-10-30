@@ -5,6 +5,7 @@ import CherryPickDialog from "./CherryPickDialog";
 import CompareSlider from "./CompareSlider";
 import DiffPanel from "./DiffPanel";
 import RegionOverlay, { type OverlayMode } from "./RegionOverlay";
+import SelectAreaDialog from "./SelectAreaDialog";
 import SideBySide from "./SideBySide";
 
 type Mode = "slider" | "side";
@@ -12,18 +13,20 @@ type Mode = "slider" | "side";
 interface Props {
   a: Commit; // the older version
   b: Commit; // the newer version
+  aIsHead: boolean; // a is its branch's latest version, so part of b can be copied into it
   bIsHead: boolean; // b is its branch's latest version, so regions can be brought back into it
   onClose: () => void;
   onCommitted: (c: Commit) => void;
 }
 
-export default function CompareView({ a, b, bIsHead, onClose, onCommitted }: Props) {
+export default function CompareView({ a, b, aIsHead, bIsHead, onClose, onCommitted }: Props) {
   const [mode, setMode] = useState<Mode>("slider");
   const [overlay, setOverlay] = useState<OverlayMode>("regions");
   const [diff, setDiff] = useState<Diff | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [focus, setFocus] = useState<number | null>(null);
   const [picking, setPicking] = useState<string | null>(null);
+  const [selecting, setSelecting] = useState<{ source: Commit; target: Commit } | null>(null);
 
   useEffect(() => {
     let live = true;
@@ -85,6 +88,37 @@ export default function CompareView({ a, b, bIsHead, onClose, onCommitted }: Pro
           restoreFrom={bIsHead ? { seq: a.seq, onRestore: setPicking } : undefined}
         />
       </div>
+
+      <div className="mt-3 flex flex-wrap gap-2">
+        {bIsHead && (
+          <button
+            onClick={() => setSelecting({ source: a, target: b })}
+            className="rounded-md border border-zinc-700 px-3 py-1.5 text-sm hover:bg-zinc-900"
+          >
+            Select part of v{a.seq} by hand, for v{b.seq}…
+          </button>
+        )}
+        {aIsHead && (
+          <button
+            onClick={() => setSelecting({ source: b, target: a })}
+            className="rounded-md border border-zinc-700 px-3 py-1.5 text-sm hover:bg-zinc-900"
+          >
+            Select part of v{b.seq} by hand, for v{a.seq}…
+          </button>
+        )}
+      </div>
+
+      {selecting && (
+        <SelectAreaDialog
+          source={selecting.source}
+          target={selecting.target}
+          onClose={() => setSelecting(null)}
+          onDone={(c) => {
+            setSelecting(null);
+            onCommitted(c);
+          }}
+        />
+      )}
 
       {picking && (
         <CherryPickDialog

@@ -81,6 +81,8 @@ def _ancestors(conn: sqlite3.Connection, commit_id: int) -> set[int]:
 
 MAX_LATER = 30
 UNDOING = 0.5  # a later change covering this much of the picked region is the change being undone
+MIN_OUTLINE_POINTS, MAX_OUTLINE_POINTS = 3, 2000
+MIN_OUTLINE_PX = 16
 
 
 def _later_drawings(conn: sqlite3.Connection, source_id: int, target_id: int, take: np.ndarray) -> np.ndarray:
@@ -107,28 +109,38 @@ def _later_drawings(conn: sqlite3.Connection, source_id: int, target_id: int, ta
 
 def build(
     conn: sqlite3.Connection, source_id: int, target_id: int, label: str, drawn: bool = False,
-    max_side: int | None = None,
+    max_side: int | None = None, outline: list[tuple[float, float]] | None = None,
 ) -> np.ndarray:
     """The cherry-picked image as an RGB array: the source's own pixels pasted into the target.
 
     drawn=False: `label` is a region that changed between source and target.
     drawn=True:  `label` is something the artist drew in the source version itself.
+    outline:     the artist's own selection. Exactly what's inside it is copied, later drawings
+                 included: they chose it by hand, so nothing is second-guessed.
     """
     if source_id == target_id:
         raise CherryPickError("Pick a region from a different version")
     source, target = _commit(conn, source_id), _commit(conn, target_id)
     if source["repo_id"] != target["repo_id"]:
         raise CherryPickError("Versions are from different pieces")
+    if outline is not None and not MIN_OUTLINE_POINTS <= len(outline) <= MAX_OUTLINE_POINTS:
+        raise CherryPickError(f"An outline needs {MIN_OUTLINE_POINTS} to {MAX_OUTLINE_POINTS} points")
 
-    if drawn:
-        mask_small, others_small = _drawn_mask(conn, source, label), None
-    else:
-        mask_small, others_small = _region_masks(conn, source_id, target_id, label)
     tgt_img = storage.load_rgb(conn, target["blob_sha"], max_side)
     size = tgt_img.size
     tgt = np.asarray(tgt_img)
     src = np.asarray(storage.load_rgb(conn, source["blob_sha"]).resize(size, Image.Resampling.LANCZOS))
 
+    if outline is not None:
+        take = compose.outline_mask(outline, size)
+        if take.sum() < MIN_OUTLINE_PX:
+            raise CherryPickError("That selection is too small; draw around the part you want")
+        return blending.paste(tgt, src, take, np.zeros_like(take))
+
+    if drawn:
+        mask_small, others_small = _drawn_mask(conn, source, label), None
+    else:
+        mask_small, others_small = _region_masks(conn, source_id, target_id, label)
     take = compose.resize_mask(mask_small, size)
     # The other changed regions are protected: the sky's soft edge must not pull the old coat in.
     protect = compose.resize_mask(others_small, size) if others_small is not None else np.zeros_like(take)
@@ -141,7 +153,7 @@ def build(
 
 def cherry_pick(
     conn: sqlite3.Connection, target_id: int, source_id: int, label: str, drawn: bool = False,
-    branch_id: int | None = None, name: str | None = None,
+    branch_id: int | None = None, name: str | None = None, outline: list[tuple[float, float]] | None = None,
 ) -> int:
     """Make the cherry-pick a new commit on top of the target, on the target's branch (or `branch_id`,
     e.g. the assistant's branch). The target must be that branch's latest version."""
@@ -151,7 +163,7 @@ def cherry_pick(
     if head != target_id:
         raise CherryPickError("Bring regions back into the latest version of a branch", 409)
 
-    img = build(conn, source_id, target_id, label, drawn)
+    img = build(conn, source_id, target_id, label, drawn, outline=outline)
     out = io.BytesIO()
     Image.fromarray(img).save(out, format="PNG", compress_level=storage.PNG_COMPRESS_LEVEL)
     blob = storage.put_image(conn, out.getvalue())
@@ -164,7 +176,10 @@ def cherry_pick(
             blob_sha=blob["sha256"],
             message=f"Brought back the {name or label} from v{source['seq']}",
             origin="cherry_pick",
-            origin_meta={"source_commit": source_id, "source_seq": source["seq"], "label": label, "drawn": drawn},
+            origin_meta={
+                "source_commit": source_id, "source_seq": source["seq"], "label": label, "drawn": drawn,
+                "selected": outline is not None,
+            },
             require_head=target_id,
         )
     except commits.HeadMoved as e:

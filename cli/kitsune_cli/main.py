@@ -325,7 +325,7 @@ class Kitsune:
         if head is None:
             raise CliError(f"Branch '{ws.branch}' has no versions yet")
         c = ok(self.api.post(f"/api/commits/{head['id']}/cherry-pick",
-                             json={"source_commit": src["id"], "label": label, "blend": "auto"}))
+                             json={"source_commit": src["id"], "label": label}))
         ws.synced[ws.branch] = self._load_into_file(c) if ws.path.suffix.lower() == ".png" else ws.synced.get(ws.branch, "")
         ws.save()
         self.out(f"v{c['seq']}: {title(c)}")
@@ -351,7 +351,7 @@ class Kitsune:
             if abort_on_conflict:
                 ok(self.api.post(f"/api/merges/{plan['id']}/abort"))
             return None
-        c = ok(self.api.post(f"/api/merges/{plan['id']}/resolve", json={"choices": take, "blend": "auto"}))
+        c = ok(self.api.post(f"/api/merges/{plan['id']}/resolve", json={"choices": take}))
         if ws.path.suffix.lower() == ".png":
             ws.synced[ws.branch] = self._load_into_file(c)
             ws.save()

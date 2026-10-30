@@ -137,6 +137,7 @@ export default function RepoPage({ repoId, onBack }: Props) {
   }
 
   const [a, b] = [...picked].sort((x, y) => x.seq - y.seq);
+  const isTip = (c: Commit) => repo?.branches.some((br) => br.name === c.branch && br.head_commit_id === c.id) ?? false;
   // Discarded explore branches are hidden, not deleted (history is append-only).
   const branches = repo.branches.filter((br) => br.kind !== "discarded");
   const shown = new Set(branches.map((br) => br.id));
@@ -237,7 +238,8 @@ export default function RepoPage({ repoId, onBack }: Props) {
           <CompareView
             a={a}
             b={b}
-            bIsHead={repo.branches.some((br) => br.head_commit_id === b.id)}
+            aIsHead={isTip(a)}
+            bIsHead={isTip(b)}
             onClose={() => setSelected([b.id])}
             onCommitted={onCherryPicked}
           />

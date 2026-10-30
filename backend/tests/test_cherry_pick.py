@@ -38,7 +38,7 @@ def test_brings_back_one_area_and_keeps_the_other(client, conn, repo, upload):
     v3 = r.json()
     assert v3["parent_id"] == v2["id"] and v3["origin"] == "cherry_pick"
     assert v3["message"] == "Brought back the top-left area from v1"
-    assert v3["origin_meta"] == {"source_commit": v1["id"], "source_seq": 1, "label": "top-left area", "drawn": False}
+    assert v3["origin_meta"] == {"source_commit": v1["id"], "source_seq": 1, "label": "top-left area", "drawn": False, "selected": False}
 
     old, new, out = pixels(conn, v1), pixels(conn, v2), pixels(conn, v3)
     assert np.array_equal(out[45, 55], old[45, 55])  # inside the top-left patch: back to v1
@@ -103,6 +103,49 @@ def test_bring_back_something_drawn_in_that_version(client, conn, repo, upload):
     out, src, new = pixels(conn, r.json()), pixels(conn, v2), pixels(conn, v3)
     assert np.array_equal(out[75, 340], src[75, 340])  # the lantern is back
     assert np.array_equal(out[60, 60], new[60, 60])  # the rest of the sky is v3's
+
+
+AROUND_LANTERN = [[0.6, 0.1], [0.75, 0.1], [0.75, 0.3], [0.6, 0.3]]  # 307..384 x 38..115 on the 512x384 scene
+
+
+def select(client, target, source, outline, **body):
+    return client.post(
+        f"/api/commits/{target['id']}/cherry-pick", json={"source_commit": source["id"], "outline": outline, **body},
+    )
+
+
+def test_a_hand_drawn_selection_copies_exactly_what_is_inside(client, conn, repo, upload):
+    v1 = upload(repo["id"], scene(sky=SKY_DUSK, extra=LANTERN))
+    v2 = upload(repo["id"], scene())
+    r = select(client, v2, v1, AROUND_LANTERN, name="lantern")
+    assert r.status_code == 201, r.text
+    assert r.json()["message"] == "Brought back the lantern from v1" and r.json()["origin_meta"]["selected"] is True
+    out, src, new = pixels(conn, r.json()), pixels(conn, v1), pixels(conn, v2)
+    assert np.array_equal(out[75, 340], src[75, 340])  # inside the line: v1, sky included
+    # Past the soft edge around the line, every pixel is exactly v2's.
+    box = np.zeros(out.shape[:2], bool)
+    box[38:116, 307:385] = True
+    far = compose.alpha(box, compose.feather_radius(out.shape) * 2) == 0
+    assert np.array_equal(out[far], new[far])
+
+
+def test_selection_is_not_second_guessed(client, conn, repo, upload):
+    # Later drawings are only protected for automatic regions. What's inside the line is what was asked for.
+    v1 = upload(repo["id"], scene(sky=SKY_DUSK))
+    v2 = upload(repo["id"], scene(sky=SKY_DUSK, extra=LANTERN))
+    r = select(client, v2, v1, AROUND_LANTERN)
+    assert r.status_code == 201 and r.json()["message"] == "Brought back the selected area from v1"
+    assert np.array_equal(pixels(conn, r.json())[75, 340], pixels(conn, v1)[75, 340])
+
+
+def test_bad_selections(client, repo, upload):
+    v1 = upload(repo["id"], scene())
+    v2 = upload(repo["id"], scene(sky=SKY_DUSK))
+    assert select(client, v2, v1, [[0.1, 0.1], [0.2, 0.2]]).status_code == 400  # not a shape
+    assert select(client, v2, v1, [[0.5, 0.5], [0.5, 0.5], [0.5, 0.5]]).status_code == 400  # a dot
+    assert select(client, v2, v1, [[0, 0]] * 3000).status_code == 400
+    assert select(client, v2, v1, AROUND_LANTERN, name="x" * 200).status_code == 422
+    assert select(client, v1, v2, AROUND_LANTERN).status_code == 409  # v1 isn't the head
 
 
 def test_only_the_artists_own_pixels(client, conn, repo, upload):

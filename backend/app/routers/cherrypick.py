@@ -4,7 +4,7 @@ import sqlite3
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from fastapi.responses import Response
 from PIL import Image
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app import jobs
 from app.config import settings
@@ -18,8 +18,10 @@ router = APIRouter(tags=["cherry-pick"])
 
 class CherryPickRequest(BaseModel):
     source_commit: int
-    label: str
+    label: str = "selected area"
     drawn: bool = False  # label names something drawn in the source itself, not a change since then
+    outline: list[tuple[float, float]] | None = None  # the artist's own selection, as 0..1 shares of the image
+    name: str | None = Field(default=None, max_length=80)  # what the artist calls it, for the version's message
 
 
 @router.post("/commits/{target_id}/cherry-pick", status_code=201, response_model=Commit)
@@ -32,7 +34,9 @@ def create_cherry_pick(
     """Copy one region of an older version back into the target, as a new commit."""
     get_commit_or_404(conn, target_id)
     try:
-        commit_id = cherry_pick.cherry_pick(conn, target_id, body.source_commit, body.label, body.drawn)
+        commit_id = cherry_pick.cherry_pick(
+            conn, target_id, body.source_commit, body.label, body.drawn, name=body.name, outline=body.outline,
+        )
     except cherry_pick.CherryPickError as e:
         raise HTTPException(e.status_code, str(e)) from e
     background.add_task(jobs.run_analysis, commit_id)

@@ -27,6 +27,20 @@ def resize_mask(mask: np.ndarray, size: tuple[int, int]) -> np.ndarray:
     return cv2.resize(mask.astype(np.uint8) * 255, size, interpolation=cv2.INTER_LINEAR) > 127
 
 
+def outline_mask(outline: list[tuple[float, float]], size: tuple[int, int]) -> np.ndarray:
+    """The inside of a hand-drawn outline (points as 0..1 shares of width and height) at (width, height).
+
+    Pulled in by the feather radius, so the soft edge sits on the line the artist drew, not outside it.
+    A selection too small to pull in stays as drawn.
+    """
+    w, h = size
+    points = np.rint(np.clip(np.array(outline, dtype=np.float64), 0, 1) * [w - 1, h - 1]).astype(np.int32)
+    mask = np.zeros((h, w), dtype=np.uint8)
+    cv2.fillPoly(mask, [points], 1)
+    inner = cv2.erode(mask, _disk(feather_radius((h, w))))
+    return (inner if inner.any() else mask) > 0
+
+
 def alpha(mask: np.ndarray, radius: int) -> np.ndarray:
     """Soft float alpha in 0..1: exactly 1 inside the mask, fading to 0 over about 2·radius px outside.
 

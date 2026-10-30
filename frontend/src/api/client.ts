@@ -225,6 +225,8 @@ export const api = {
     `${BASE}/api/commits/${target}/cherry-pick/preview?source=${source}&label=${encodeURIComponent(label)}`,
   cherryPick: (target: number, source: number, label: string) =>
     request<Commit>(`/api/commits/${target}/cherry-pick`, json({ source_commit: source, label })),
+  copySelection: (target: number, source: number, outline: [number, number][], name?: string) =>
+    request<Commit>(`/api/commits/${target}/cherry-pick`, json({ source_commit: source, outline, name })),
   planMerge: (repoId: number, source: string, target: string) =>
     request<MergePlan>(`/api/repos/${repoId}/merges`, json({ source, target })),
   resolveMerge: (mergeId: number, choices: Record<number, Side>) =>
