@@ -157,3 +157,5 @@ class Commit(BaseModel):
     created_at: str
     image_url: str
     thumb_url: str
+    source_ext: str | None  # kra, psd or ora when the artist's layered file is kept
+    source_url: str | None

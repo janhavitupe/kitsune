@@ -163,7 +163,7 @@ def test_tracking_a_krita_file(client, tmp_path):
     root.mkdir()
     kra = root / "girl.kra"
 
-    def save(*patches):
+    def save(*patches, layer=b"layer 1"):
         img = scene()
         d = ImageDraw.Draw(img)
         for box, color in patches:
@@ -173,6 +173,7 @@ def test_tracking_a_krita_file(client, tmp_path):
         with zipfile.ZipFile(kra, "w") as z:
             z.writestr("mimetype", "application/x-krita")
             z.writestr("mergedimage.png", out.getvalue())
+            z.writestr("layers/layer1", layer)
 
     save()
     lines = []
@@ -181,7 +182,40 @@ def test_tracking_a_krita_file(client, tmp_path):
     assert k.commit(None)["seq"] == 2
     assert [r["label"] for r in k.diff(None, None)["regions"]] == ["top-left area"]
 
+    v1 = next(c for c in k.commits() if c["seq"] == 1)
+    assert v1["source_ext"] == "kra"
+    v2_file = kra.read_bytes()
+
     k.branch("alt", "v1")
-    before = kra.read_bytes()
     k.switch("alt")
-    assert kra.read_bytes() == before and "left as it is" in lines[-1]  # layers are never overwritten
+    assert kra.read_bytes() != v2_file and not k.ws.dirty()
+    with zipfile.ZipFile(kra) as z:
+        assert z.read("layers/layer1") == b"layer 1"  # the layers are back, not only the picture
+    assert (root / ".kitsune" / "before-load.kra").read_bytes() == v2_file
+
+    save((BOTTOM_RIGHT, PINK), layer=b"painted on alt")
+    assert k.commit(None)["branch"] == "alt"
+    alt_file = kra.read_bytes()
+
+    k.switch("main")
+    assert kra.read_bytes() == v2_file
+    k.switch("alt")
+    assert kra.read_bytes() == alt_file
+
+    out = root / "old.kra"
+    k.checkout("v2", out)
+    assert out.read_bytes() == v2_file
+    k.checkout("v2", root / "old.png")
+    assert (root / "old.png").read_bytes().startswith(b"\x89PNG")
+
+    # A version Kitsune built from pixels has no layers: the file stays, and it says so.
+    c = k.pick("top-left area", "v2")
+    assert kra.read_bytes() == alt_file and "wasn't changed" in lines[-1] and c["source_url"] is None
+    with pytest.raises(cli.CliError, match="no layered file"):
+        k.checkout(f"v{c['seq']}", root / "built.kra")
+    k.commit("back to painting", allow_same=True)
+    k.switch("main")
+    k.branch("from-built", f"v{c['seq']}")
+    before = kra.read_bytes()
+    k.switch("from-built")
+    assert kra.read_bytes() == before and "left as it is" in lines[-1]

@@ -33,6 +33,7 @@ class Settings(BaseSettings):
 
     # Upload limits
     max_upload_mb: int = 25
+    max_source_mb: int = 200  # a layered .kra/.psd/.ora is far bigger than its flattened image
     max_side_px: int = 8000
     thumb_px: int = 320
 

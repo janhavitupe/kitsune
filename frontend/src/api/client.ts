@@ -56,6 +56,8 @@ export interface Commit {
   created_at: string;
   image_url: string;
   thumb_url: string;
+  source_ext: string | null; // kra, psd or ora when the artist's layered file is kept
+  source_url: string | null;
 }
 
 export interface ChangedRegion {

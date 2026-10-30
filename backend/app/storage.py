@@ -5,6 +5,9 @@ in which case its flattened image is used. Every upload is normalized to an RGB 
 SHA-256 of its decoded pixels, sharded like Git: data/blobs/ab/cdef....png. Hashing pixels rather
 than file bytes means the same picture saved as a JPG, or as a PNG by a different app, is still
 stored once. Thumbnails live next to them under data/thumbs/.
+
+Those PNGs are what Kitsune diffs and copies. A paint app's file is also kept whole, byte for byte
+and with its layers, under data/sources/, so any version can be handed back exactly as it was saved.
 """
 
 import base64
@@ -58,7 +61,7 @@ def _flattened(data: bytes) -> bytes:
                 info = z.getinfo("mergedimage.png")
             except KeyError:
                 raise ImageRejected("This file has no flattened image inside. Export a PNG from your paint app.") from None
-            if info.file_size > settings.max_upload_mb * 1024 * 1024 * 4:  # PNG inflates; still guard against zip bombs
+            if info.file_size > settings.max_source_mb * 1024 * 1024:  # still guard against zip bombs
                 raise ImageRejected("The image inside this file is too large", status_code=413)
             return z.read(info)
     except zipfile.BadZipFile as e:
@@ -68,14 +71,15 @@ def _flattened(data: bytes) -> bytes:
 UNREADABLE = "Not a readable image. Upload a PNG, JPG, PSD (Photoshop), KRA (Krita) or ORA file."
 
 
-def decode(data: bytes) -> tuple[Image.Image, bool]:
+def decode(data: bytes, max_mb: int | None = None) -> tuple[Image.Image, bool]:
     """Decode an upload to RGB, or raise ImageRejected.
 
     Returns (rgb_image, passthrough). passthrough is True when the upload already is an RGB PNG
     with no rotation to apply, so its bytes can be stored as they are without re-encoding.
     """
-    if len(data) > settings.max_upload_mb * 1024 * 1024:
-        raise ImageRejected(f"Image is larger than {settings.max_upload_mb} MB", status_code=413)
+    max_mb = max_mb or settings.max_upload_mb
+    if len(data) > max_mb * 1024 * 1024:
+        raise ImageRejected(f"Image is larger than {max_mb} MB", status_code=413)
     try:
         img = Image.open(io.BytesIO(data))
         if max(img.size) > settings.max_side_px:
@@ -136,10 +140,41 @@ def data_uri(conn: sqlite3.Connection, sha: str, max_side: int = 1024) -> str:
     return "data:image/jpeg;base64," + base64.b64encode(out.getvalue()).decode()
 
 
-def put_image(conn: sqlite3.Connection, data: bytes) -> sqlite3.Row:
+def layered_ext(data: bytes) -> str | None:
+    """'kra', 'ora' or 'psd' when this upload is a paint app's own file, else None."""
+    if data.startswith(b"8BPS"):
+        return "psd"
+    if not data.startswith(b"PK\x03\x04"):
+        return None
+    try:
+        with zipfile.ZipFile(io.BytesIO(data)) as z:
+            return "ora" if "mimetype" in z.namelist() and z.read("mimetype").strip() == b"image/openraster" else "kra"
+    except zipfile.BadZipFile:
+        return None
+
+
+def put_upload(conn: sqlite3.Connection, data: bytes) -> tuple[sqlite3.Row, str | None]:
+    """Store what an artist uploaded: its image, plus the file itself if it holds layers.
+    Returns the blobs row and the sources sha (None for a plain PNG or JPG)."""
+    ext = layered_ext(data)
+    if ext is None:
+        return put_image(conn, data), None
+    if len(data) > settings.max_source_mb * 1024 * 1024:
+        raise ImageRejected(f"File is larger than {settings.max_source_mb} MB", status_code=413)
+    blob = put_image(conn, data, max_mb=settings.max_source_mb)
+
+    sha = hashlib.sha256(data).hexdigest()
+    if not conn.execute("SELECT 1 FROM sources WHERE sha256 = ?", (sha,)).fetchone():
+        rel = _shard("sources", sha, ext)
+        _write_atomic(rel, data)
+        conn.execute("INSERT OR IGNORE INTO sources (sha256, path, ext, size) VALUES (?, ?, ?, ?)", (sha, rel, ext, len(data)))
+    return blob, sha
+
+
+def put_image(conn: sqlite3.Connection, data: bytes, max_mb: int | None = None) -> sqlite3.Row:
     """Store an uploaded image (deduplicated) and return its blobs row."""
     data = _flattened(data)  # before decoding, so a passthrough stores the inner PNG, not the .kra
-    img, passthrough = decode(data)
+    img, passthrough = decode(data, max_mb)
     sha = pixel_sha(img)
 
     row = conn.execute("SELECT * FROM blobs WHERE sha256 = ?", (sha,)).fetchone()

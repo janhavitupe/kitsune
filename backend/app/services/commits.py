@@ -19,6 +19,7 @@ def create(
     branch_id: int,
     blob_sha: str,
     message: str | None,
+    source_sha: str | None = None,
     origin: str = "upload",
     origin_meta: dict | None = None,
     require_head: int | None = None,
@@ -29,6 +30,7 @@ def create(
     require_head: refuse (HeadMoved) unless the branch head is still this commit. Used when the
     new image was built from that head, so it can't land on top of a newer version.
     merge_parent_id: the second parent of a merge commit (the merged branch's head).
+    source_sha: the artist's layered file, when this version is one they saved.
     """
     with transaction(conn):
         # Read the head inside the write lock so two writers can't share a parent.
@@ -37,9 +39,9 @@ def create(
             raise HeadMoved("The branch has a newer version; open the latest one and try again")
         seq = conn.execute("SELECT COALESCE(MAX(seq), 0) + 1 FROM commits WHERE repo_id = ?", (repo_id,)).fetchone()[0]
         commit_id = conn.execute(
-            "INSERT INTO commits (repo_id, seq, branch_id, parent_id, merge_parent_id, blob_sha, message,"
-            " origin, origin_meta_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (repo_id, seq, branch_id, head, merge_parent_id, blob_sha, message, origin,
+            "INSERT INTO commits (repo_id, seq, branch_id, parent_id, merge_parent_id, blob_sha, source_sha, message,"
+            " origin, origin_meta_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (repo_id, seq, branch_id, head, merge_parent_id, blob_sha, source_sha, message, origin,
              json.dumps(origin_meta) if origin_meta else None, now()),
         ).lastrowid
         conn.execute("UPDATE branches SET head_commit_id = ? WHERE id = ?", (commit_id, branch_id))
@@ -55,7 +57,7 @@ class CannotDelete(ValueError):
 def delete(conn: sqlite3.Connection, commit_id: int) -> None:
     """Delete a version nothing is built on: the latest one on its branch, with no later version,
     merge or other branch starting from it. Its branch goes back to the version before. Its notes
-    go with it, and its image too unless another version uses the same pixels."""
+    go with it, and its image and layered file too unless another version uses them."""
     with transaction(conn):
         c = conn.execute("SELECT * FROM commits WHERE id = ?", (commit_id,)).fetchone()
         if c is None:
@@ -90,5 +92,8 @@ def delete(conn: sqlite3.Connection, commit_id: int) -> None:
             blob = conn.execute("SELECT path, thumb_path FROM blobs WHERE sha256 = ?", (c["blob_sha"],)).fetchone()
             files += [blob["path"], blob["thumb_path"]]
             conn.execute("DELETE FROM blobs WHERE sha256 = ?", (c["blob_sha"],))
+        if c["source_sha"] and not conn.execute("SELECT 1 FROM commits WHERE source_sha = ?", (c["source_sha"],)).fetchone():
+            files.append(conn.execute("SELECT path FROM sources WHERE sha256 = ?", (c["source_sha"],)).fetchone()["path"])
+            conn.execute("DELETE FROM sources WHERE sha256 = ?", (c["source_sha"],))
     for rel in files:
         storage.abs_path(rel).unlink(missing_ok=True)

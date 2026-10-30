@@ -17,6 +17,15 @@ CREATE TABLE IF NOT EXISTS blobs (
   thumb_path TEXT NOT NULL     -- relative to DATA_DIR
 );
 
+-- The artist's own layered file (.kra, .psd, .ora), byte for byte. Kept apart from blobs, which are
+-- keyed by pixels: two saves can look identical and still hold different layers.
+CREATE TABLE IF NOT EXISTS sources (
+  sha256 TEXT PRIMARY KEY,     -- of the file's bytes
+  path TEXT NOT NULL,          -- relative to DATA_DIR
+  ext TEXT NOT NULL,           -- kra | psd | ora
+  size INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS branches (
   id INTEGER PRIMARY KEY,
   repo_id INTEGER NOT NULL REFERENCES repos(id),
@@ -35,6 +44,7 @@ CREATE TABLE IF NOT EXISTS commits (
   parent_id INTEGER REFERENCES commits(id),
   merge_parent_id INTEGER REFERENCES commits(id),
   blob_sha TEXT NOT NULL REFERENCES blobs(sha256),
+  source_sha TEXT REFERENCES sources(sha256),  -- the layered file; NULL for PNG/JPG and for built versions
   message TEXT,
   auto_message TEXT,
   origin TEXT NOT NULL DEFAULT 'upload',         -- upload | cherry_pick | merge | explore | assistant

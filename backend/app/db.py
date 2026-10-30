@@ -27,6 +27,7 @@ def connect() -> sqlite3.Connection:
 # doesn't touch existing tables, so databases made earlier get them here.
 ADDED_COLUMNS = [
     ("repos", "private_mode", "INTEGER NOT NULL DEFAULT 0"),
+    ("commits", "source_sha", "TEXT REFERENCES sources(sha256)"),
 ]
 
 

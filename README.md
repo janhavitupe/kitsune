@@ -27,7 +27,7 @@ Save versions of a painting, branch to try ideas, and see exactly what changed b
 
 Every AI feature has an honest fallback, so nothing breaks when a model is slow or offline: messages fall back to the measured summary, search to rules, the story to one assembled from the history, the assistant to a rule-based planner that runs simple asks ("take the sky from v2 and warm it") with the same tools, and voice notes to the browser's own speech recognition. Every model result is cached by its inputs, and `AI_OFFLINE=1` replays the demo with no model calls at all.
 
-**Works next to any paint app.** The `kitsune` command line tracks your paint app's own file (Photoshop `.psd`, Krita `.kra`, OpenRaster `.ora`) or an exported PNG, like git tracks a file: `commit`, `branch`, `switch`, `diff`, `merge`, `pick sky --from v3`, and `watch` to commit every time you save. It talks to the same backend, so the browser shows the same history.
+**Works next to any paint app.** The `kitsune` command line tracks your paint app's own file (Photoshop `.psd`, Krita `.kra`, OpenRaster `.ora`) or an exported PNG, like git tracks a file: `commit`, `branch`, `switch`, `diff`, `merge`, `pick sky --from v3`, and `watch` to commit every time you save. Every version you commit keeps your whole file with its layers, and `switch` and `checkout` put it back byte for byte. It talks to the same backend, so the browser shows the same history.
 
 **History is append-only.** Cherry-picks, merges, explore variations and the assistant always make new versions; nothing is ever overwritten. You can delete the latest version of a branch (a bring-back you didn't like), but never one that later work is built on.
 
@@ -129,7 +129,7 @@ scripts/   probe, seed, timing
 
 ## Limitations and next steps
 
-- Kitsune versions the flattened image. It reads `.psd`, `.kra` and `.ora` files but doesn't diff or restore individual layers; `.procreate`, `.clip` and `.xcf` need a PNG export.
+- Each `.psd`, `.kra` or `.ora` version is stored whole, up to 200 MB (`MAX_SOURCE_MB`), with no delta compression, so a long history of big files fills the disk fast. Diffs work on the flattened image, not per layer. `.procreate`, `.clip` and `.xcf` need a PNG export, which has no layers.
 - A cherry-picked region is placed where it was; if the composition moved, it won't follow.
-- With a `.psd` or `.kra`, `kitsune switch` and `checkout` can't rebuild your layers, so they leave the file alone and write a PNG on request.
+- Versions Kitsune builds from pixels (merge, bring-back, explore) are flat. Your layers stay in the versions you committed; `switch` and `checkout` leave the file alone rather than flatten it.
 - Next: a Krita plugin, an iPad share-sheet shortcut, and shared repos for client review.

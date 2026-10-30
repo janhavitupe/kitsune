@@ -3,7 +3,8 @@
 Point Kitsune at the file your paint app saves (Photoshop .psd, Krita .kra, OpenRaster .ora) or an
 exported PNG/JPG, then commit, branch, diff,
 merge and bring regions back like you would with git. Everything is stored in a Kitsune backend;
-the browser UI shows the same history.
+the browser UI shows the same history. A paint app's file is stored whole, layers included, so
+switch and checkout put back exactly what you saved.
 
     kitsune init forest-girl.png            start tracking a file (first commit)
     kitsune commit -m "warmer sky"          save a version
@@ -11,8 +12,8 @@ the browser UI shows the same history.
     kitsune log                             versions on this branch (--all for every branch)
     kitsune diff                            what changed in the last version (or: diff v3 v5)
     kitsune branch red-coat --from v2       new branch; `kitsune branch` lists them
-    kitsune switch red-coat                 change branch and load its latest image into the file
-    kitsune checkout v3                     load an old version into the file (or -o elsewhere.png)
+    kitsune switch red-coat                 change branch and load its latest version into the file
+    kitsune checkout v3                     load an old version into the file (or -o elsewhere.kra)
     kitsune pick sky --from v3              bring the sky from v3 into this branch
     kitsune merge red-coat                  merge a branch into the current one
     kitsune note "client wants dusk"        attach a note to the latest version
@@ -26,6 +27,7 @@ State lives in .kitsune/config.json in the folder where you ran `init`.
 import argparse
 import hashlib
 import json
+import os
 import sys
 import time
 import webbrowser
@@ -37,8 +39,13 @@ import httpx
 
 STATE_DIR = ".kitsune"
 IMAGE_TYPES = {".png", ".jpg", ".jpeg", ".psd", ".kra", ".ora"}
+LAYERED_TYPES = {".psd", ".kra", ".ora"}
 DEFAULT_BACKEND = "http://127.0.0.1:8000"
 DEFAULT_WEB = "http://localhost:5173"
+
+
+NO_LAYERS = ("v{v} has no layered file, because Kitsune built it from pixels or it predates layer storage. "
+             "Versions you committed keep their layers. `kitsune checkout v{v} -o v{v}.png` for the flat image.")
 
 
 class CliError(RuntimeError):
@@ -161,6 +168,19 @@ class Kitsune:
             ok(data)
         dest.write_bytes(data.content)
         return hashlib.sha256(data.content).hexdigest()
+
+    def write_source(self, commit: dict, dest: Path) -> str:
+        """Write a version's layered file, whole or not at all: a dropped connection can't cost a painting."""
+        data = self.api.get(commit["source_url"])
+        if data.status_code >= 400:
+            ok(data)
+        tmp = dest.with_name(dest.name + ".kitsune-tmp")
+        tmp.write_bytes(data.content)
+        os.replace(tmp, dest)
+        return hashlib.sha256(data.content).hexdigest()
+
+    def has_layers_for(self, commit: dict, path: Path) -> bool:
+        return bool(commit.get("source_url")) and path.suffix.lower() == f".{commit['source_ext']}"
 
     # --- commands ------------------------------------------------------------------------------
 
@@ -292,19 +312,22 @@ class Kitsune:
         ws.branch = name
         if head is None:
             self.out(f"On branch {name} (no versions yet).")
-        elif ws.path.suffix.lower() == ".png":
+        elif self.can_load(head):
             ws.synced[name] = self._load_into_file(head)
             self.out(f"On branch {name}. Loaded v{head['seq']} into {ws.file}; reload it in your paint app.")
         else:
-            # A .psd or .kra holds layers Kitsune doesn't have, so the file is left alone.
-            self.out(f"On branch {name} (latest v{head['seq']}). {ws.file} was left as it is: Kitsune only keeps the flattened "
-                     f"image, so it can't rebuild your layers. `kitsune checkout v{head['seq']} -o v{head['seq']}.png` to see it.")
+            self.out(f"On branch {name} (latest v{head['seq']}). {ws.file} was left as it is: {NO_LAYERS.format(v=head['seq'])}")
         ws.save()
 
     def checkout(self, ref: str, output: Path | None, force: bool = False) -> None:
         c = self.version(ref)
         if output:
-            self.write_image(c, output)
+            if self.has_layers_for(c, output):
+                self.write_source(c, output)
+            elif output.suffix.lower() in LAYERED_TYPES:
+                raise CliError(NO_LAYERS.format(v=c["seq"]))
+            else:
+                self.write_image(c, output)
             self.out(f"Wrote v{c['seq']} to {output}")
             return
         if self.ws.dirty() and not force:
@@ -312,10 +335,18 @@ class Kitsune:
         self._load_into_file(c)
         self.out(f"Loaded v{c['seq']} into {self.ws.file}. Commit to continue from it on {self.ws.branch}.")
 
+    def can_load(self, c: dict) -> bool:
+        return self.has_layers_for(c, self.ws.path) or self.ws.path.suffix.lower() == ".png"
+
     def _load_into_file(self, c: dict) -> str:
-        if self.ws.path.suffix.lower() != ".png":
-            raise CliError("Loading versions into the file needs a PNG; use `kitsune checkout vN -o some.png`")
-        return self.write_image(c, self.ws.path)
+        path = self.ws.path
+        if self.has_layers_for(c, path):
+            if path.exists():  # one step of undo, in case the file held something never committed
+                (self.ws.root / STATE_DIR / f"before-load{path.suffix}").write_bytes(path.read_bytes())
+            return self.write_source(c, path)
+        if path.suffix.lower() != ".png":
+            raise CliError(NO_LAYERS.format(v=c["seq"]))
+        return self.write_image(c, path)
 
     def pick(self, label: str, from_ref: str) -> dict:
         ws = self.ws
@@ -329,6 +360,7 @@ class Kitsune:
         ws.synced[ws.branch] = self._load_into_file(c) if ws.path.suffix.lower() == ".png" else ws.synced.get(ws.branch, "")
         ws.save()
         self.out(f"v{c['seq']}: {title(c)}")
+        self._say_if_flat(c)
         return c
 
     def merge(self, source: str, take: dict[str, str], abort_on_conflict: bool = True) -> dict | None:
@@ -356,7 +388,12 @@ class Kitsune:
             ws.synced[ws.branch] = self._load_into_file(c)
             ws.save()
         self.out(f"v{c['seq']}: {title(c)}")
+        self._say_if_flat(c)
         return c
+
+    def _say_if_flat(self, c: dict) -> None:
+        if self.ws.path.suffix.lower() in LAYERED_TYPES and not self.has_layers_for(c, self.ws.path):
+            self.out(f"{self.ws.file} wasn't changed: {NO_LAYERS.format(v=c['seq'])}")
 
     def note(self, text: str, ref: str, client: bool) -> None:
         c = self.version(ref)

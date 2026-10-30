@@ -6,11 +6,12 @@ from fastapi import HTTPException
 from app.schemas import Branch, Commit
 
 COMMIT_SELECT = """
-SELECT c.*, b.name AS branch, bl.width, bl.height,
+SELECT c.*, b.name AS branch, bl.width, bl.height, s.ext AS source_ext,
   (SELECT COUNT(*) FROM voice_notes v WHERE v.commit_id = c.id) AS note_count
 FROM commits c
 JOIN branches b ON b.id = c.branch_id
 JOIN blobs bl ON bl.sha256 = c.blob_sha
+LEFT JOIN sources s ON s.sha256 = c.source_sha
 """
 
 
@@ -34,6 +35,7 @@ def to_commit(row: sqlite3.Row) -> Commit:
         origin_meta=json.loads(meta) if meta else None,
         image_url=f"/api/blobs/{sha}",
         thumb_url=f"/api/blobs/{sha}/thumb",
+        source_url=f"/api/commits/{d['id']}/source" if d["source_sha"] else None,
     )
 
 

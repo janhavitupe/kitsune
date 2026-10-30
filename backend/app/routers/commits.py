@@ -1,6 +1,7 @@
 import sqlite3
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
+from fastapi.responses import FileResponse
 
 from app import jobs, storage
 from app.db import get_db
@@ -28,7 +29,7 @@ def create_commit(
         raise HTTPException(404, f"Branch '{branch}' not found")
 
     try:
-        blob = storage.put_image(conn, image.file.read())
+        blob, source_sha = storage.put_upload(conn, image.file.read())
     except storage.ImageRejected as e:
         raise HTTPException(e.status_code, str(e)) from e
 
@@ -37,6 +38,7 @@ def create_commit(
         repo_id=repo_id,
         branch_id=branch_row["id"],
         blob_sha=blob["sha256"],
+        source_sha=source_sha,
         message=(message or "").strip() or None,
     )
     background.add_task(jobs.run_analysis, commit_id)
@@ -54,6 +56,17 @@ def list_commits(repo_id: int, conn: sqlite3.Connection = Depends(get_db)):
 @router.get("/commits/{commit_id}", response_model=Commit)
 def get_commit(commit_id: int, conn: sqlite3.Connection = Depends(get_db)):
     return get_commit_or_404(conn, commit_id)
+
+
+@router.get("/commits/{commit_id}/source")
+def get_source(commit_id: int, conn: sqlite3.Connection = Depends(get_db)):
+    """The file exactly as the artist saved it, layers and all."""
+    row = conn.execute(
+        "SELECT c.seq, s.path, s.ext FROM commits c JOIN sources s ON s.sha256 = c.source_sha WHERE c.id = ?", (commit_id,)
+    ).fetchone()
+    if row is None:
+        raise HTTPException(404, "This version has no layered file")
+    return FileResponse(storage.abs_path(row["path"]), media_type="application/octet-stream", filename=f"v{row['seq']}.{row['ext']}")
 
 
 @router.post("/commits/{commit_id}/analyze", status_code=202, response_model=Commit)

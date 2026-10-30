@@ -125,6 +125,11 @@ export default function CommitDetail({
           <button onClick={onExplore} className="rounded-md border border-zinc-700 px-3 py-2 text-left text-sm hover:bg-zinc-900">
             Explore palettes…
           </button>
+          {commit.source_url && (
+            <a href={assetUrl(commit.source_url)} className="rounded-md border border-zinc-700 px-3 py-2 text-sm hover:bg-zinc-900">
+              Download with layers (.{commit.source_ext})
+            </a>
+          )}
           {isTip && (
             <button onClick={remove} className="rounded-md border border-red-900 px-3 py-2 text-left text-sm text-red-400 hover:bg-red-950">
               Delete this version
