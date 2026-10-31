@@ -12,19 +12,25 @@
 
 Planning stores the decision in `merges`; resolving rebuilds the masks (the diff is
 deterministic) and writes a merge commit with two parents. If the target hasn't changed since
-the branch split off, the merge commit simply carries the source's image.
+the branch split off, the merge commit simply carries the source's image and layered file.
+
+When both heads are Krita files the merge also happens layer by layer (see kra_merge), so it lands
+in the painting. Nothing has to be picked then: a layer changed on both sides stays in the file
+twice, for the artist to settle in Krita, and the flat image shows the source's change on top,
+which is how those layers stack.
 """
 
 import io
 import json
 import sqlite3
 from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
 from PIL import Image
 
 from app import storage
-from app.services import blending, commits, compose, diffing, pixel_diff
+from app.services import blending, commits, compose, diffing, kra_merge, pixel_diff
 from app.services.graph import common_ancestor
 from app.services.region_diff import ChangedRegion
 
@@ -64,6 +70,31 @@ def _branch(conn: sqlite3.Connection, repo_id: int, name: str) -> sqlite3.Row:
 
 def _blob_sha(conn: sqlite3.Connection, commit_id: int) -> str:
     return conn.execute("SELECT blob_sha FROM commits WHERE id = ?", (commit_id,)).fetchone()[0]
+
+
+def _kra(conn: sqlite3.Connection, commit_id: int) -> Path | None:
+    row = conn.execute(
+        "SELECT s.path FROM commits c JOIN sources s ON s.sha256 = c.source_sha WHERE c.id = ? AND s.ext = 'kra'",
+        (commit_id,),
+    ).fetchone()
+    return storage.abs_path(row["path"]) if row else None
+
+
+def _layer_files(conn: sqlite3.Connection, base: int, x: int, y: int) -> tuple[Path | None, Path, Path] | None:
+    """(ancestor, target, source) Krita files, or None unless both heads are Krita files. The ancestor
+    may be missing: then anything that differs counts as changed on both sides, so nothing is lost."""
+    ours, theirs = _kra(conn, y), _kra(conn, x)
+    return (_kra(conn, base), ours, theirs) if ours and theirs else None
+
+
+def _layer_plan(conn: sqlite3.Connection, base: int, x: int, y: int) -> dict | None:
+    files = _layer_files(conn, base, x, y)
+    if files is None:
+        return None
+    try:
+        return kra_merge.plan(*files)
+    except kra_merge.Unsupported:
+        return None
 
 
 def _resized(regions: list[ChangedRegion], size: tuple[int, int]) -> list[ChangedRegion]:
@@ -120,18 +151,24 @@ def plan(conn: sqlite3.Connection, repo_id: int, source: str, target: str) -> in
         raise MergeError(f"'{target}' already has everything from '{source}'")
 
     fast_forward = base == y
+    layers = None
     if fast_forward:
         auto, conflicts = [_summary(r) for r in diffing.analyze(conn, y, x).regions], []
     else:
         c = classify(conn, base, x, y)
         auto = [_summary(r) for r in c.auto]
-        conflicts = [
-            {"index": i, **_summary(k.change), "target_labels": k.target_labels} for i, k in enumerate(c.conflicts)
-        ]
+        layers = _layer_plan(conn, base, x, y)
+        if layers is None:
+            conflicts = [
+                {"index": i, **_summary(k.change), "target_labels": k.target_labels} for i, k in enumerate(c.conflicts)
+            ]
+        else:  # both sides stay in the file, so there's nothing to pick
+            conflicts = []
+            auto += [_summary(k.change) for k in c.conflicts]
 
     data = {
         "source": source, "target": target, "source_head": x, "target_head": y, "base": base,
-        "fast_forward": fast_forward, "auto": auto, "conflicts": conflicts,
+        "fast_forward": fast_forward, "auto": auto, "conflicts": conflicts, "layers": layers,
     }
     return conn.execute(
         "INSERT INTO merges (repo_id, source_branch, target_branch, base_commit, plan_json, status)"
@@ -151,6 +188,8 @@ def _message(p: dict, taken: list[str]) -> str:
     msg = f"Merged {p['source']} into {p['target']}"
     if taken:
         msg += ": took the " + ", the ".join(taken)
+    if both := (p.get("layers") or {}).get("both"):
+        msg += f". Both versions of {', '.join(both)} are in the file as layers"
     return msg
 
 
@@ -173,15 +212,19 @@ def resolve(conn: sqlite3.Connection, merge_id: int, choices: dict[int, str]) ->
     x, y = p["source_head"], p["target_head"]
     taken = [a["label"] for a in p["auto"]]
     meta = {"source_branch": p["source"], "source_head": x, "base": p["base"], "merge_id": merge_id}
+    layers, source_sha = p.get("layers"), None
     if p["fast_forward"]:
         blob_sha = _blob_sha(conn, x)
+        source_sha = conn.execute("SELECT source_sha FROM commits WHERE id = ?", (x,)).fetchone()[0]
     else:
         c = classify(conn, p["base"], x, y)
         take = np.zeros(c.size[::-1], dtype=bool)
         for r in c.auto:
             take |= r.mask
         for i, k in enumerate(c.conflicts):
-            if choices.get(i, "target") == "source":
+            if layers is not None:
+                take |= k.change.mask
+            elif choices.get(i, "target") == "source":
                 take |= k.take
                 taken.append(k.change.label)
         tgt_img = storage.load_rgb(conn, _blob_sha(conn, y))
@@ -193,6 +236,12 @@ def resolve(conn: sqlite3.Connection, merge_id: int, choices: dict[int, str]) ->
         out = io.BytesIO()
         Image.fromarray(img).save(out, format="PNG", compress_level=storage.PNG_COMPRESS_LEVEL)
         blob_sha = storage.put_image(conn, out.getvalue())["sha256"]
+        if layers is not None:
+            try:
+                merged = kra_merge.merged_file(*_layer_files(conn, p["base"], x, y), out.getvalue(), p["target"], p["source"])
+                source_sha = storage.put_source(conn, merged, "kra")
+            except kra_merge.Unsupported:
+                pass  # a flat merge; the artist's file is left alone and they're told so
 
     try:
         commit_id = commits.create(
@@ -200,6 +249,7 @@ def resolve(conn: sqlite3.Connection, merge_id: int, choices: dict[int, str]) ->
             repo_id=p["repo_id"],
             branch_id=tgt["id"],
             blob_sha=blob_sha,
+            source_sha=source_sha,
             message=_message(p, taken),
             origin="merge",
             origin_meta={**meta, "taken": taken},

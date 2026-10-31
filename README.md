@@ -17,7 +17,7 @@ Save versions of a painting, branch to try ideas, and see exactly what changed b
 | 🔍 | **Semantic visual diff**: changed areas outlined and named, with how they changed (warmer, darker, more muted, redrawn) | OpenCV change mask in Lab space ∩ **SAM 3.1** regions; change split by kind of color shift |
 | ✍ | **Auto commit messages**: "Warmed the sky into a dusk palette and tightened the left figure's silhouette." | **Muse Spark** with the measured changes as structured hints |
 | ↩ | **Region cherry-pick**: bring back part of an old version (the old sky, or the lantern you drew in v4) into the latest one | A pixel-for-pixel copy of your own painting with a soft edge; anything drawn later in that area (a lantern in the sky) is kept, never pasted over. Or **draw around the part yourself** with mouse, pen or touch, see the result right away, and exactly what's inside your line is copied |
-| 🔀 | **Smart merge**: changes on one branch only are taken, changes on both become pick-one cards | Three-way region diff against the common ancestor |
+| 🔀 | **Smart merge**: changes on one branch only are taken, changes on both become pick-one cards; two Krita files merge layer by layer, into the file | Three-way region diff against the common ancestor; three-way layer merge by Krita layer id |
 | 🎙 | **Notes and client feedback**, typed or recorded, pinned to a version | **Muse Voice Transcribe**; Spark turns long client feedback into a list of requested changes |
 | 🔎 | **Searchable history**, including "before / after / when I changed X" | SQLite FTS5 over messages, notes, captions, changed regions; Spark captions each version and reads the query |
 | 🎨 | **Explore branches**: three palette variations, each on its own branch, keep or discard | Color shifts of your own pixels (warm, cool, muted, brighter, darker), like an adjustment layer; nothing is redrawn |
@@ -131,5 +131,6 @@ scripts/   probe, seed, timing
 
 - Each `.psd`, `.kra` or `.ora` version is stored whole, up to 200 MB (`MAX_SOURCE_MB`), with no delta compression, so a long history of big files fills the disk fast. Diffs work on the flattened image, not per layer. `.procreate`, `.clip` and `.xcf` need a PNG export, which has no layers.
 - A cherry-picked region is placed where it was; if the composition moved, it won't follow.
-- Versions Kitsune builds from pixels (merge, bring-back, explore) are flat. Your layers stay in the versions you committed; `switch` and `checkout` leave the file alone rather than flatten it.
+- Merging two Krita files gives a real `.kra`. Each layer is merged on its own: a layer changed on one branch comes from that branch, new layers are added, and a layer changed on both stays twice, with a third layer holding the pixels where they collide. Animated layers and different canvases fall back to a flat merge, and `.psd` and `.ora` always do.
+- Other versions Kitsune builds from pixels (bring-back, explore) are flat. Your layers stay in the versions you committed; `switch` and `checkout` leave the file alone rather than flatten it.
 - Next: a Krita plugin, an iPad share-sheet shortcut, and shared repos for client review.

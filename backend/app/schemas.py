@@ -124,6 +124,13 @@ class MergeConflict(MergeChange):
     target_labels: list[str]  # what the target branch calls the area it changed there
 
 
+class MergeLayers(BaseModel):
+    added: list[str]
+    updated: list[str]
+    removed: list[str]
+    both: list[str]  # changed on both sides: kept as separate layers
+
+
 class MergePlan(BaseModel):
     id: int
     status: str  # open | resolved | aborted
@@ -135,6 +142,7 @@ class MergePlan(BaseModel):
     fast_forward: bool  # the target hasn't changed since the source branched off
     auto: list[MergeChange]  # changed on the source only: taken automatically
     conflicts: list[MergeConflict]  # changed on both sides: the artist picks
+    layers: MergeLayers | None = None  # what happens in the Krita file, when both sides are one
 
 
 class Commit(BaseModel):

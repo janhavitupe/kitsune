@@ -114,6 +114,23 @@ export default function MergeDialog({ repoId, branches, commitsById, defaultSour
               </section>
             )}
 
+            {plan.layers && (
+              <section>
+                <h3 className="text-xs font-medium tracking-wide text-zinc-500 uppercase">In the Krita file</h3>
+                <ul className="mt-2 space-y-1 text-sm">
+                  {plan.layers.added.map((n) => <li key={`a${n}`}>Layer added: {n}</li>)}
+                  {plan.layers.updated.map((n) => <li key={`u${n}`}>Layer updated: {n}</li>)}
+                  {plan.layers.removed.map((n) => <li key={`r${n}`}>Layer removed: {n}</li>)}
+                  {plan.layers.both.map((n) => (
+                    <li key={`b${n}`}>
+                      {n}
+                      <span className="text-zinc-500"> changed on both branches: both stay as layers, with any overlap on its own layer</span>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
+
             {plan.conflicts.length > 0 && (
               <section>
                 <h3 className="text-xs font-medium tracking-wide text-zinc-500 uppercase">

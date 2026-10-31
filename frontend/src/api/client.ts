@@ -107,6 +107,7 @@ export interface MergePlan {
   fast_forward: boolean;
   auto: MergeChange[];
   conflicts: MergeConflict[];
+  layers: { added: string[]; updated: string[]; removed: string[]; both: string[] } | null;
 }
 
 export type Side = "source" | "target";

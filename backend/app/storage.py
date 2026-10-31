@@ -162,13 +162,17 @@ def put_upload(conn: sqlite3.Connection, data: bytes) -> tuple[sqlite3.Row, str 
     if len(data) > settings.max_source_mb * 1024 * 1024:
         raise ImageRejected(f"File is larger than {settings.max_source_mb} MB", status_code=413)
     blob = put_image(conn, data, max_mb=settings.max_source_mb)
+    return blob, put_source(conn, data, ext)
 
+
+def put_source(conn: sqlite3.Connection, data: bytes, ext: str) -> str:
+    """Keep a layered file byte for byte (deduplicated) and return its sources sha."""
     sha = hashlib.sha256(data).hexdigest()
     if not conn.execute("SELECT 1 FROM sources WHERE sha256 = ?", (sha,)).fetchone():
         rel = _shard("sources", sha, ext)
         _write_atomic(rel, data)
         conn.execute("INSERT OR IGNORE INTO sources (sha256, path, ext, size) VALUES (?, ?, ?, ?)", (sha, rel, ext, len(data)))
-    return blob, sha
+    return sha
 
 
 def put_image(conn: sqlite3.Connection, data: bytes, max_mb: int | None = None) -> sqlite3.Row:

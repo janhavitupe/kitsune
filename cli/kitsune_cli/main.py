@@ -372,6 +372,11 @@ class Kitsune:
             self.out(f"{ws.branch} hasn't moved since {source} branched off: fast-forward.")
         for ch in plan["auto"]:
             self.out(f"  auto: {ch['label']}")
+        layers = plan.get("layers") or {}
+        for key, what in (("added", "layer added"), ("updated", "layer updated"), ("removed", "layer removed"),
+                          ("both", "kept both versions of layer")):
+            for name in layers.get(key, []):
+                self.out(f"  {what}: {name}")
         unresolved = [cf for cf in plan["conflicts"] if str(cf["index"]) not in take]
         if unresolved:
             self.out(f"{len(plan['conflicts'])} conflict(s). Both branches changed:")
@@ -384,10 +389,13 @@ class Kitsune:
                 ok(self.api.post(f"/api/merges/{plan['id']}/abort"))
             return None
         c = ok(self.api.post(f"/api/merges/{plan['id']}/resolve", json={"choices": take}))
-        if ws.path.suffix.lower() == ".png":
+        loaded = self.can_load(c)
+        if loaded:
             ws.synced[ws.branch] = self._load_into_file(c)
             ws.save()
         self.out(f"v{c['seq']}: {title(c)}")
+        if loaded and self.has_layers_for(c, ws.path):
+            self.out(f"Loaded it into {ws.file}; reload it in your paint app.")
         self._say_if_flat(c)
         return c
 
