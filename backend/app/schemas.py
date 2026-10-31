@@ -143,6 +143,7 @@ class MergePlan(BaseModel):
     auto: list[MergeChange]  # changed on the source only: taken automatically
     conflicts: list[MergeConflict]  # changed on both sides: the artist picks
     layers: MergeLayers | None = None  # what happens in the Krita file, when both sides are one
+    restore: bool = False  # the source is an older version of the target: its lost layers come back
 
 
 class Commit(BaseModel):

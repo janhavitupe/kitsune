@@ -11,6 +11,25 @@ interface Props {
   onMerged: (c: Commit) => void;
 }
 
+const VERSION = "version:"; // prefix of the source picker's value when it's an older version, not a branch
+
+/** Krita versions older than a branch's head and in its history, newest first. */
+function olderVersions(head: number | null | undefined, commitsById: Map<number, Commit>): Commit[] {
+  const seen = new Set<number>();
+  const queue = head == null ? [] : [head];
+  while (queue.length) {
+    const c = commitsById.get(queue.pop()!);
+    if (!c || seen.has(c.id)) continue;
+    seen.add(c.id);
+    for (const p of [c.parent_id, c.merge_parent_id]) if (p !== null) queue.push(p);
+  }
+  if (head != null) seen.delete(head);
+  return [...seen]
+    .map((id) => commitsById.get(id)!)
+    .filter((c) => c.source_ext === "kra")
+    .sort((a, b) => b.seq - a.seq);
+}
+
 /** Check what merging one branch into another would do, pick a side for each conflict, merge. */
 export default function MergeDialog({ repoId, branches, commitsById, defaultSource, onClose, onMerged }: Props) {
   const names = branches.filter((b) => b.head_commit_id !== null).map((b) => b.name);
@@ -20,6 +39,9 @@ export default function MergeDialog({ repoId, branches, commitsById, defaultSour
   const [choices, setChoices] = useState<Record<number, Side>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const head = branches.find((b) => b.name === target)?.head_commit_id;
+  const targetHasLayers = head != null && commitsById.get(head)?.source_ext === "kra";
+  const older = targetHasLayers ? olderVersions(head, commitsById) : [];
 
   const close = () => {
     if (busy) return;
@@ -38,7 +60,7 @@ export default function MergeDialog({ repoId, branches, commitsById, defaultSour
     setError(null);
     setPlan(null);
     try {
-      const p = await api.planMerge(repoId, source, target);
+      const p = await api.planMerge(repoId, source.startsWith(VERSION) ? Number(source.slice(VERSION.length)) : source, target);
       setPlan(p);
       setChoices(Object.fromEntries(p.conflicts.map((c) => [c.index, "target" as Side])));
     } catch (e) {
@@ -75,12 +97,20 @@ export default function MergeDialog({ repoId, branches, commitsById, defaultSour
         <div className="mt-4 flex flex-wrap items-end gap-2 text-sm">
           <label className="flex flex-col gap-1">
             <span className="text-zinc-400">Bring changes from</span>
-            <BranchSelect value={source} options={names} onChange={(v) => (setSource(v), setPlan(null))} />
+            <BranchSelect value={source} options={names} versions={older} onChange={(v) => (setSource(v), setPlan(null))} />
           </label>
           <span className="pb-2 text-zinc-500">into</span>
           <label className="flex flex-col gap-1">
             <span className="text-zinc-400">Branch</span>
-            <BranchSelect value={target} options={names} onChange={(v) => (setTarget(v), setPlan(null))} />
+            <BranchSelect
+              value={target}
+              options={names}
+              onChange={(v) => {
+                setTarget(v);
+                setPlan(null);
+                if (source.startsWith(VERSION)) setSource(defaultSource); // versions belong to the old target
+              }}
+            />
           </label>
           <button
             onClick={check}
@@ -99,6 +129,12 @@ export default function MergeDialog({ repoId, branches, commitsById, defaultSour
                 as it is.
               </p>
             ) : null}
+
+            {plan.restore && (
+              <p className="text-sm text-zinc-300">
+                Everything in <b>{plan.target}</b> stays as it is. The layers it no longer has come back from <b>{plan.source}</b>.
+              </p>
+            )}
 
             {plan.auto.length > 0 && (
               <section>
@@ -169,7 +205,7 @@ export default function MergeDialog({ repoId, branches, commitsById, defaultSour
               </section>
             )}
 
-            {!plan.fast_forward && plan.auto.length === 0 && plan.conflicts.length === 0 && (
+            {!plan.fast_forward && !plan.restore && plan.auto.length === 0 && plan.conflicts.length === 0 && (
               <p className="text-sm text-zinc-400">Both branches made the same changes; the merge only records that they came together.</p>
             )}
           </div>
@@ -194,7 +230,17 @@ export default function MergeDialog({ repoId, branches, commitsById, defaultSour
   );
 }
 
-function BranchSelect({ value, options, onChange }: { value: string; options: string[]; onChange: (v: string) => void }) {
+function BranchSelect({
+  value,
+  options,
+  versions = [],
+  onChange,
+}: {
+  value: string;
+  options: string[];
+  versions?: Commit[];
+  onChange: (v: string) => void;
+}) {
   return (
     <select value={value} onChange={(e) => onChange(e.target.value)} className="rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1.5">
       {options.map((o) => (
@@ -202,6 +248,15 @@ function BranchSelect({ value, options, onChange }: { value: string; options: st
           {o}
         </option>
       ))}
+      {versions.length > 0 && (
+        <optgroup label="Layers from an older version">
+          {versions.map((c) => (
+            <option key={c.id} value={`${VERSION}${c.seq}`}>
+              v{c.seq}
+            </option>
+          ))}
+        </optgroup>
+      )}
     </select>
   );
 }

@@ -293,3 +293,92 @@ def test_a_fast_forward_keeps_the_branch_file(client, tmp_path):
     plan = client.post(f"/api/repos/{repo}/merges", json={"source": "night", "target": "main"}).json()
     c = client.post(f"/api/merges/{plan['id']}/resolve", json={"choices": {}}).json()
     assert client.get(c["source_url"]).content == data
+
+
+SUN = rgba((0, 0, 20, 20, BLUE))
+TREE = rgba((10, 10, 30, 30, GREEN))
+
+
+def restore(tmp_path, older, newer):
+    a, b = kra(tmp_path / "older.kra", older), kra(tmp_path / "newer.kra", newer)
+    plan = kra_merge.plan_restore(a, b)
+    data, png = kra_merge.restored_file(a, b, "main", "v4")
+    out = tmp_path / "merged.kra"
+    out.write_bytes(data)
+    return plan, out, np.asarray(Image.open(io.BytesIO(png)))
+
+
+def test_an_older_version_brings_back_the_layer_the_newer_lost(tmp_path):
+    sky = layer("s", "sky", SKY)
+    plan, out, flat = restore(tmp_path, [layer("sun", "sun", SUN), sky], [layer("tree", "tree", TREE), sky])
+    assert plan == {"added": ["sun"], "updated": [], "removed": [], "both": []}
+    assert [n for n, _ in stack(out)] == ["tree", "sun", "sky"]
+    assert (pixels(out, "sun") == SUN).all() and (pixels(out, "tree") == TREE).all()
+    assert tuple(flat[5, 5]) == (0, 0, 255)  # only the sun here
+    assert tuple(flat[15, 15]) == (0, 255, 0)  # the tree is above the sun
+    assert tuple(flat[40, 40]) == (255, 0, 0)  # the sky shows through
+    assert tuple(flat[100, 100]) == (255, 255, 255)  # nothing was painted
+
+
+def test_an_older_version_never_undoes_a_later_edit(tmp_path):
+    new_sky = rgba((0, 0, W, 60, GREEN))
+    plan, out, flat = restore(tmp_path, [layer("sun", "sun", SUN), layer("s", "sky", SKY)], [layer("s", "sky", new_sky)])
+    assert plan["added"] == ["sun"] and plan["both"] == [] and plan["updated"] == []
+    assert (pixels(out, "sky") == new_sky).all()
+    assert tuple(flat[40, 40]) == (0, 255, 0)
+
+
+def test_stacking_honors_opacity_and_hidden_layers(tmp_path):
+    sky = layer("s", "sky", SKY)
+    half = layer("h", "haze", rgba((0, 0, W, H, BLUE)), opacity=128)
+    hidden = layer("x", "hidden", rgba((0, 0, W, H, GREEN)), visible=0)
+    _, _, flat = restore(tmp_path, [hidden, sky], [half, sky])
+    assert tuple(flat[100, 100]) == (127, 127, 255)  # half blue over the white canvas
+    assert flat[40, 40][1] == 0  # the hidden green layer stays out of the picture
+
+
+@pytest.mark.parametrize("extra", [{"compositeop": "multiply"}, {"nodetype": "grouplayer"}])
+def test_what_cant_be_stacked_is_refused(tmp_path, extra):
+    sky = layer("s", "sky", SKY)
+    a = kra(tmp_path / "a.kra", [layer("sun", "sun", SUN), sky])
+    b = kra(tmp_path / "b.kra", [layer("t", "tree", TREE, **extra), sky])
+    with pytest.raises(kra_merge.Unsupported, match="tree"):
+        kra_merge.plan_restore(a, b)
+
+
+def on_main(client, repo, tmp_path, name, layers):
+    return upload(client, repo, kra(tmp_path / name, layers).read_bytes(), "main")
+
+
+def test_merging_an_older_version_of_the_same_branch(client, tmp_path):
+    repo = client.post("/api/repos", json={"name": "piece"}).json()["id"]
+    sky = layer("s", "sky", SKY)
+    v1 = on_main(client, repo, tmp_path, "a.kra", [layer("sun", "sun", SUN), sky])
+    v2 = on_main(client, repo, tmp_path, "b.kra", [layer("tree", "tree", TREE), sky])
+
+    plan = client.post(f"/api/repos/{repo}/merges", json={"source_version": v1["seq"], "target": "main"}).json()
+    assert plan["restore"] and plan["source"] == f"v{v1['seq']}" and plan["layers"]["added"] == ["sun"]
+    assert plan["conflicts"] == [] and not plan["fast_forward"]
+
+    c = client.post(f"/api/merges/{plan['id']}/resolve", json={"choices": {}}).json()
+    assert c["parent_id"] == v2["id"] and c["merge_parent_id"] == v1["id"] and c["branch"] == "main"
+    assert c["message"] == f"Merged v{v1['seq']} into main: brought back sun"
+    merged = tmp_path / "merged.kra"
+    merged.write_bytes(client.get(c["source_url"]).content)
+    assert [n for n, _ in stack(merged)] == ["tree", "sun", "sky"]
+
+    again = client.post(f"/api/repos/{repo}/merges", json={"source_version": v1["seq"], "target": "main"})
+    assert again.status_code == 400 and "already has every layer" in again.json()["detail"]
+
+
+def test_only_older_versions_of_the_target_can_be_merged(client, tmp_path):
+    repo = client.post("/api/repos", json={"name": "piece"}).json()["id"]
+    sky = layer("s", "sky", SKY)
+    v1 = on_main(client, repo, tmp_path, "a.kra", [sky])
+    client.post(f"/api/repos/{repo}/branches", json={"name": "night", "from_commit": v1["id"]}).raise_for_status()
+    v2 = on_main(client, repo, tmp_path, "b.kra", [layer("tree", "tree", TREE), sky])
+    night = upload(client, repo, kra(tmp_path / "c.kra", [layer("sun", "sun", SUN), sky]).read_bytes(), "night")
+
+    for seq, status in ((v2["seq"], 400), (night["seq"], 400), (99, 404)):
+        r = client.post(f"/api/repos/{repo}/merges", json={"source_version": seq, "target": "main"})
+        assert r.status_code == status, r.text

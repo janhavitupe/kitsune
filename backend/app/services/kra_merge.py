@@ -15,6 +15,12 @@ pixels are in the overlap layer, and those are the artist's own two layers stack
 
 Anything this can't merge safely (animation, a different canvas) raises Unsupported, and the caller
 falls back to a flat merge that leaves the artist's file alone.
+
+An older version can also be merged into a newer one on the same line of work (see restored_file).
+The older file is both ancestor and source, so every layer the newer one has stays as it is, and
+what merging adds is the layers it no longer has, back in the places they sat. No region diff can
+say which side of a changed area to keep here, so the flat image is stacked from the merged layers;
+a file that can't be stacked faithfully (groups, masks, blend modes) raises Unsupported.
 """
 
 import copy
@@ -145,8 +151,11 @@ class Overlap:
         return self.ours.uuid
 
 
-def _three_way(base: Doc | None, ours: Doc, theirs: Doc) -> tuple[list[Keep | Overlap], dict[str, list[str]]]:
-    """The merged layer stack, top layer first, and what happened to each layer."""
+def _three_way(
+    base: Doc | None, ours: Doc, theirs: Doc, restore: bool = False,
+) -> tuple[list[Keep | Overlap], dict[str, list[str]]]:
+    """The merged layer stack, top layer first, and what happened to each layer. With `restore`, a
+    layer we deleted and they left alone comes back instead of staying deleted."""
     if any(ours.image.get(k) != theirs.image.get(k) for k in SAME_CANVAS):
         raise Unsupported("The two versions have different canvases")
 
@@ -177,7 +186,7 @@ def _three_way(base: Doc | None, ours: Doc, theirs: Doc) -> tuple[list[Keep | Ov
     # Their new layers go where they painted them: above the same layer they sat on
     order = list(theirs.nodes.items())
     for i, (u, node) in reversed(list(enumerate(order))):
-        if u in ours.nodes or (was(u) is not None and was(u) == _fingerprint(theirs, node)):
+        if u in ours.nodes or (not restore and was(u) is not None and was(u) == _fingerprint(theirs, node)):
             continue  # we have it, or we deleted it and they left it alone
         placed = [k.uuid for k in stack]
         below = next((v for v, _ in order[i + 1:] if v in placed), None)
@@ -203,6 +212,19 @@ def _with_docs(base: Path | None, ours: Path, theirs: Path, work):
 def plan(base: Path | None, ours: Path, theirs: Path) -> dict[str, list[str]]:
     """What merging these files would do to their layers. Raises Unsupported."""
     return _with_docs(base, ours, theirs, lambda *docs: _three_way(*docs)[1])
+
+
+def plan_restore(older: Path, newer: Path) -> dict[str, list[str]]:
+    """What merging an older version into a newer one would do. Raises Unsupported."""
+    def work(o: Doc, n: Doc, t: Doc) -> dict[str, list[str]]:
+        stack, summary = _three_way(o, n, t, restore=True)
+        _flatten(stack, _size(n))  # refuse now, not after the artist has confirmed
+        return summary
+    return _with_docs(older, newer, older, work)
+
+
+def _size(doc: Doc) -> tuple[int, int]:
+    return int(doc.image.get("width")), int(doc.image.get("height"))
 
 
 def _lzf(data: bytes) -> bytes:
@@ -267,6 +289,35 @@ def _encode(pixels: np.ndarray, mask: np.ndarray) -> bytes:
     return header + b"".join(records)
 
 
+def _over(under: np.ndarray, over: np.ndarray) -> np.ndarray:
+    """One B, G, R, A layer on top of another, as Krita's normal blending stacks them."""
+    top, bottom = over[..., 3:] / 255, under[..., 3:] / 255
+    alpha = top + bottom * (1 - top)
+    color = (over[..., :3] * top + under[..., :3] * bottom * (1 - top)) / np.maximum(alpha, 1e-6)
+    return np.dstack([color, alpha * 255]).round().astype(np.uint8)
+
+
+def _flatten(stack: list[Keep | Overlap], size: tuple[int, int]) -> bytes:
+    """A PNG of the layers stacked, top first in `stack`. Raises Unsupported rather than guess at
+    anything but plain paint layers."""
+    w, h = size
+    canvas = np.zeros((h, w, PIXEL_SIZE), np.uint8)
+    for item in reversed(stack):
+        node = item.node
+        if node.get("visible", "1") == "0":
+            continue
+        px = _pixels(item.doc, node, size)
+        if px is None or len(node) or node.get("compositeop", "normal") != "normal":
+            raise Unsupported(f"the layer '{node.get('name')}' is a group, has a mask or uses a blend mode")
+        px[..., 3] = (px[..., 3] * (int(node.get("opacity", 255)) / 255)).round()
+        canvas = _over(canvas, px)
+    shown = canvas[..., 3:] / 255
+    rgb = canvas[..., 2::-1] * shown + 255 * (1 - shown)  # what's left transparent shows as Krita's white
+    out = io.BytesIO()
+    Image.fromarray(rgb.round().astype(np.uint8)).save(out, format="PNG")
+    return out.getvalue()
+
+
 def _collision(item: Overlap, size: tuple[int, int]) -> bytes | None:
     """The layer file for where both branches changed the same pixels differently, or None if they didn't.
     Its pixels are their layer over ours, exactly as the two stack."""
@@ -280,10 +331,7 @@ def _collision(item: Overlap, size: tuple[int, int]) -> bytes | None:
     mask = (a != old).any(axis=2) & (b != old).any(axis=2) & (a != b).any(axis=2)
     if not mask.any():
         return None
-    over, under = b[..., 3:] / 255, a[..., 3:] / 255
-    alpha = over + under * (1 - over)
-    color = (b[..., :3] * over + a[..., :3] * under * (1 - over)) / np.maximum(alpha, 1e-6)
-    out = np.dstack([color, alpha * 255]).round().astype(np.uint8)
+    out = _over(a, b)
     out[~mask] = 0
     return _encode(out, mask)
 
@@ -295,7 +343,7 @@ def _new_uuid() -> str:
 def _build(ours: Doc, stack: list[Keep | Overlap], flat_png: bytes, ours_name: str, theirs_name: str) -> bytes:
     numbers = [int(f[5:]) for f in ours.files if f.startswith("layer") and f[5:].isdigit()]
     names = (f"layer{n}" for n in itertools.count(max(numbers, default=0) + 1))
-    size = (int(ours.image.get("width")), int(ours.image.get("height")))
+    size = _size(ours)
     kept, added, nodes = set(), {}, []
 
     for item in stack:
@@ -368,3 +416,12 @@ def merged_file(base: Path | None, ours: Path, theirs: Path, flat_png: bytes, ou
     def work(b: Doc | None, a: Doc, t: Doc) -> bytes:
         return _build(a, _three_way(b, a, t)[0], flat_png, ours_name, theirs_name)
     return _with_docs(base, ours, theirs, work)
+
+
+def restored_file(older: Path, newer: Path, newer_name: str, older_name: str) -> tuple[bytes, bytes]:
+    """(merged .kra, its flat PNG): the newer file with the layers only the older one has put back."""
+    def work(o: Doc, n: Doc, t: Doc) -> tuple[bytes, bytes]:
+        stack = _three_way(o, n, t, restore=True)[0]
+        flat_png = _flatten(stack, _size(n))
+        return _build(n, stack, flat_png, newer_name, older_name), flat_png
+    return _with_docs(older, newer, older, work)

@@ -14,7 +14,8 @@ router = APIRouter(tags=["merges"])
 
 
 class MergeRequest(BaseModel):
-    source: str  # branch to merge in
+    source: str = ""  # branch to merge in
+    source_version: int | None = None  # or an older version of the target, by number, to bring its layers back
     target: str  # branch that receives the merge commit
 
 
@@ -34,7 +35,10 @@ def plan_merge(repo_id: int, body: MergeRequest, conn: sqlite3.Connection = Depe
     """Check what merging one branch into another would do: automatic picks and conflicts."""
     get_repo_or_404(conn, repo_id)
     try:
-        merge_id = merge.plan(conn, repo_id, body.source, body.target)
+        if body.source_version is None:
+            merge_id = merge.plan(conn, repo_id, body.source, body.target)
+        else:
+            merge_id = merge.plan_restore(conn, repo_id, body.source_version, body.target)
     except merge.MergeError as e:
         raise HTTPException(e.status_code, str(e)) from e
     return _plan(conn, merge_id)

@@ -16,6 +16,7 @@ switch and checkout put back exactly what you saved.
     kitsune checkout v3                     load an old version into the file (or -o elsewhere.kra)
     kitsune pick sky --from v3              bring the sky from v3 into this branch
     kitsune merge red-coat                  merge a branch into the current one
+    kitsune merge v4                        bring back the Krita layers this branch has lost since v4
     kitsune note "client wants dusk"        attach a note to the latest version
     kitsune search "before the dusk sky"    search the history
     kitsune watch                           commit every time the paint app saves
@@ -28,6 +29,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import sys
 import time
 import webbrowser
@@ -367,7 +369,12 @@ class Kitsune:
         ws = self.ws
         if ws.dirty():
             raise CliError("Commit your changes before merging.")
-        plan = ok(self.api.post(f"/api/repos/{ws.repo_id}/merges", json={"source": source, "target": ws.branch}))
+        version = re.fullmatch(r"[vV](\d+)", source)
+        if version and not any(b["name"] == source for b in self.repo()["branches"]):
+            what = {"source_version": int(version[1])}
+        else:
+            what = {"source": source}
+        plan = ok(self.api.post(f"/api/repos/{ws.repo_id}/merges", json={**what, "target": ws.branch}))
         if plan["fast_forward"]:
             self.out(f"{ws.branch} hasn't moved since {source} branched off: fast-forward.")
         for ch in plan["auto"]:
@@ -496,8 +503,8 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("label", help="region name as `kitsune diff` shows it, e.g. sky")
     s.add_argument("--from", dest="from_ref", required=True)
 
-    s = sub.add_parser("merge", help="merge a branch into the current one")
-    s.add_argument("source")
+    s = sub.add_parser("merge", help="merge a branch into the current one, or an older version's layers")
+    s.add_argument("source", help="a branch, or an older version of this one, e.g. v4")
     s.add_argument("--take", help="conflict choices, e.g. 0=source,1=target")
 
     s = sub.add_parser("note", help="attach a note to a version")

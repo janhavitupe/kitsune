@@ -108,6 +108,7 @@ export interface MergePlan {
   auto: MergeChange[];
   conflicts: MergeConflict[];
   layers: { added: string[]; updated: string[]; removed: string[]; both: string[] } | null;
+  restore: boolean; // the source is an older version of the target: its lost layers come back
 }
 
 export type Side = "source" | "target";
@@ -230,8 +231,11 @@ export const api = {
     request<Commit>(`/api/commits/${target}/cherry-pick`, json({ source_commit: source, label })),
   copySelection: (target: number, source: number, outline: [number, number][], name?: string) =>
     request<Commit>(`/api/commits/${target}/cherry-pick`, json({ source_commit: source, outline, name })),
-  planMerge: (repoId: number, source: string, target: string) =>
-    request<MergePlan>(`/api/repos/${repoId}/merges`, json({ source, target })),
+  planMerge: (repoId: number, source: string | number, target: string) =>
+    request<MergePlan>(
+      `/api/repos/${repoId}/merges`,
+      json(typeof source === "number" ? { source_version: source, target } : { source, target }),
+    ),
   resolveMerge: (mergeId: number, choices: Record<number, Side>) =>
     request<Commit>(`/api/merges/${mergeId}/resolve`, json({ choices })),
   abortMerge: (mergeId: number) => request<MergePlan>(`/api/merges/${mergeId}/abort`, { method: "POST" }),

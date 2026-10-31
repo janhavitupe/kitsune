@@ -93,6 +93,7 @@ kitsune commit                     # after saving in your paint app; Muse Spark 
 kitsune branch dusk --from v1 && kitsune switch dusk   # loads that version into forest.png
 kitsune diff                       # named regions and how they changed
 kitsune merge dusk --take 0=source # conflicts are listed with their index
+kitsune merge v4                   # Krita files: bring back layers this branch has lost since v4
 kitsune pick "sky" --from v3       # bring a region back
 kitsune watch                      # commit on every save
 kitsune --help                     # everything else: status, log, checkout, note, search, open
@@ -112,7 +113,7 @@ Before the demo: seed it (`--backend https://<render-url>`), click through every
 
 ```bash
 cd backend
-.venv/Scripts/python -m pytest        # 116 tests; model calls are faked, never real
+.venv/Scripts/python -m pytest        # 166 tests; model calls are faked, never real
 ```
 
 Other scripts: `scripts/probe_model_api.py` (check model ids and response shapes), `scripts/time_openweights.py` (Baseten vs Fireworks latency).
@@ -131,6 +132,6 @@ scripts/   probe, seed, timing
 
 - Each `.psd`, `.kra` or `.ora` version is stored whole, up to 200 MB (`MAX_SOURCE_MB`), with no delta compression, so a long history of big files fills the disk fast. Diffs work on the flattened image, not per layer. `.procreate`, `.clip` and `.xcf` need a PNG export, which has no layers.
 - A cherry-picked region is placed where it was; if the composition moved, it won't follow.
-- Merging two Krita files gives a real `.kra`. Each layer is merged on its own: a layer changed on one branch comes from that branch, new layers are added, and a layer changed on both stays twice, with a third layer holding the pixels where they collide. Animated layers and different canvases fall back to a flat merge, and `.psd` and `.ora` always do.
+- Merging two Krita files gives a real `.kra`. Each layer is merged on its own: a layer changed on one branch comes from that branch, new layers are added, and a layer changed on both stays twice, with a third layer holding the pixels where they collide. Animated layers and different canvases fall back to a flat merge, and `.psd` and `.ora` always do. You can also merge an older version of the same branch (`kitsune merge v4`, or pick it in the Merge dialog): every layer in the latest version stays as it is, and the layers it lost come back where they sat. That needs both versions to be Krita files made of plain paint layers, since Kitsune stacks them itself for the flat image; groups, masks and blend modes are refused, and a bring-back still works there.
 - Other versions Kitsune builds from pixels (bring-back, explore) are flat. Your layers stay in the versions you committed; `switch` and `checkout` leave the file alone rather than flatten it.
 - Next: a Krita plugin, an iPad share-sheet shortcut, and shared repos for client review.

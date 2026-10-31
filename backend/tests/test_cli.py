@@ -219,3 +219,14 @@ def test_tracking_a_krita_file(client, tmp_path):
     before = kra.read_bytes()
     k.switch("from-built")
     assert kra.read_bytes() == before and "left as it is" in lines[-1]
+
+
+def test_merging_an_older_version_is_told_from_a_branch(studio):
+    paint(studio.ws.path, (TOP_LEFT, WHITE))
+    studio.commit("second")  # a flat file: the backend refuses, and says what to do instead
+    with pytest.raises(cli.CliError, match="Krita"):
+        studio.merge("v1", {})
+    with pytest.raises(cli.CliError, match="v9"):
+        studio.merge("v9", {})
+    with pytest.raises(cli.CliError, match="nope"):
+        studio.merge("nope", {})

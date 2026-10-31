@@ -18,6 +18,9 @@ When both heads are Krita files the merge also happens layer by layer (see kra_m
 in the painting. Nothing has to be picked then: a layer changed on both sides stays in the file
 twice, for the artist to settle in Krita, and the flat image shows the source's change on top,
 which is how those layers stack.
+
+An older version on the target's own line can be merged in too (plan_restore). It has nothing the
+target "hasn't seen", so this only works on layers: the ones the target lost come back.
 """
 
 import io
@@ -31,7 +34,7 @@ from PIL import Image
 
 from app import storage
 from app.services import blending, commits, compose, diffing, kra_merge, pixel_diff
-from app.services.graph import common_ancestor
+from app.services.graph import ancestors, common_ancestor
 from app.services.region_diff import ChangedRegion
 
 OVERLAP = 0.1  # two changes collide when they share this much of the smaller one
@@ -170,10 +173,42 @@ def plan(conn: sqlite3.Connection, repo_id: int, source: str, target: str) -> in
         "source": source, "target": target, "source_head": x, "target_head": y, "base": base,
         "fast_forward": fast_forward, "auto": auto, "conflicts": conflicts, "layers": layers,
     }
+    return _store(conn, repo_id, src["id"], tgt["id"], base, data)
+
+
+def plan_restore(conn: sqlite3.Connection, repo_id: int, seq: int, target: str) -> int:
+    """Work out what merging version `seq`, older than the head of `target` and in its history, would
+    bring back, and store it as an open merge."""
+    tgt = _branch(conn, repo_id, target)
+    y = tgt["head_commit_id"]
+    row = conn.execute("SELECT id, branch_id FROM commits WHERE repo_id = ? AND seq = ?", (repo_id, seq)).fetchone()
+    if row is None:
+        raise MergeError(f"Version v{seq} not found", 404)
+    x = row["id"]
+    if x == y or x not in ancestors(conn, y):
+        raise MergeError(f"v{seq} isn't an older version of '{target}'; to merge another line of work, merge its branch")
+    older, newer = _kra(conn, x), _kra(conn, y)
+    if not (older and newer):
+        raise MergeError("Both versions need to be Krita files to merge their layers; bring back the part you want instead")
+    try:
+        layers = kra_merge.plan_restore(older, newer)
+    except kra_merge.Unsupported as e:
+        raise MergeError(f"These versions can't be merged layer by layer: {e}") from e
+    if not layers["added"]:
+        raise MergeError(f"'{target}' already has every layer from v{seq}")
+
+    data = {
+        "source": f"v{seq}", "target": target, "source_head": x, "target_head": y, "base": x,
+        "fast_forward": False, "auto": [], "conflicts": [], "layers": layers, "restore": True,
+    }
+    return _store(conn, repo_id, row["branch_id"], tgt["id"], x, data)
+
+
+def _store(conn: sqlite3.Connection, repo_id: int, source_branch: int, target_branch: int, base: int, data: dict) -> int:
     return conn.execute(
         "INSERT INTO merges (repo_id, source_branch, target_branch, base_commit, plan_json, status)"
         " VALUES (?, ?, ?, ?, ?, 'open')",
-        (repo_id, src["id"], tgt["id"], base, json.dumps(data)),
+        (repo_id, source_branch, target_branch, base, json.dumps(data)),
     ).lastrowid
 
 
@@ -186,6 +221,8 @@ def get(conn: sqlite3.Connection, merge_id: int) -> dict:
 
 def _message(p: dict, taken: list[str]) -> str:
     msg = f"Merged {p['source']} into {p['target']}"
+    if p.get("restore"):
+        return f"{msg}: brought back {', '.join(p['layers']['added'])}"
     if taken:
         msg += ": took the " + ", the ".join(taken)
     if both := (p.get("layers") or {}).get("both"):
@@ -204,8 +241,10 @@ def resolve(conn: sqlite3.Connection, merge_id: int, choices: dict[int, str]) ->
         raise MergeError(f"No conflict number {', '.join(map(str, sorted(unknown)))}")
 
     tgt = _branch(conn, p["repo_id"], p["target"])
-    src = _branch(conn, p["repo_id"], p["source"])
-    if (src["head_commit_id"], tgt["head_commit_id"]) != (p["source_head"], p["target_head"]):
+    moved = tgt["head_commit_id"] != p["target_head"]
+    if not p.get("restore"):  # a version can't move; a branch can
+        moved = moved or _branch(conn, p["repo_id"], p["source"])["head_commit_id"] != p["source_head"]
+    if moved:
         conn.execute("UPDATE merges SET status = 'aborted' WHERE id = ?", (merge_id,))
         raise MergeError("A branch got a new version since this merge was checked; check it again", 409)
 
@@ -213,7 +252,14 @@ def resolve(conn: sqlite3.Connection, merge_id: int, choices: dict[int, str]) ->
     taken = [a["label"] for a in p["auto"]]
     meta = {"source_branch": p["source"], "source_head": x, "base": p["base"], "merge_id": merge_id}
     layers, source_sha = p.get("layers"), None
-    if p["fast_forward"]:
+    if p.get("restore"):
+        try:
+            merged, flat_png = kra_merge.restored_file(_kra(conn, x), _kra(conn, y), p["target"], p["source"])
+        except kra_merge.Unsupported as e:
+            raise MergeError(f"These versions can't be merged layer by layer: {e}") from e
+        blob_sha = storage.put_image(conn, flat_png)["sha256"]
+        source_sha = storage.put_source(conn, merged, "kra")
+    elif p["fast_forward"]:
         blob_sha = _blob_sha(conn, x)
         source_sha = conn.execute("SELECT source_sha FROM commits WHERE id = ?", (x,)).fetchone()[0]
     else:

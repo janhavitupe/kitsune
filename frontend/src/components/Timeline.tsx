@@ -60,6 +60,11 @@ export default function Timeline({ branches, commits, selected, highlighted = []
     const y1 = from.y + THUMB_H / 2;
     const x2 = to.x;
     const y2 = to.y + THUMB_H / 2;
+    if (y1 === y2 && kind === "merge") {
+      // An older version merged into its own lane: arc over the cards between them.
+      const [cx1, cx2] = [from.x + CARD_W / 2, to.x + CARD_W / 2];
+      return `M ${cx1} ${from.y} C ${cx1} ${from.y - PAD}, ${cx2} ${to.y - PAD}, ${cx2} ${to.y}`;
+    }
     if (y1 === y2) return `M ${x1} ${y1} L ${x2} ${y2}`;
     const half = GAP / 2;
     return kind === "parent"
