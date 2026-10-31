@@ -35,7 +35,7 @@ HEADER = (b'<?xml version="1.0" encoding="UTF-8"?>\n'
           b"<!DOCTYPE DOC PUBLIC '-//KDE//DTD krita 2.0//EN' 'http://www.calligra.org/DTD/krita-2.0.dtd'>\n")
 ET.register_namespace("", NS)
 
-TILE = 64  # Krita stores layers in 64 px tiles, each 4 planes (B, G, R, A) for 8-bit RGBA
+TILE = 64  # Krita stores layers in 64 px tiles of B, G, R, A: as 4 planes when compressed, pixel by pixel when raw
 PIXEL_SIZE = 4
 RAW, LZF = 0, 1  # the flag byte in front of every tile's data
 TILE_BYTES = TILE * TILE * PIXEL_SIZE
@@ -244,8 +244,10 @@ def _pixels(doc: Doc, node: ET.Element, size: tuple[int, int]) -> np.ndarray | N
         left, top, right, bottom = max(x0, 0), max(y0, 0), min(x0 + TILE, w), min(y0 + TILE, h)
         if left >= right or top >= bottom:
             continue  # off the canvas
-        raw = _lzf(stored[1:]) if stored[0] == LZF else stored[1:]
-        tile = np.frombuffer(raw, np.uint8).reshape(PIXEL_SIZE, TILE, TILE).transpose(1, 2, 0)
+        if stored[0] == LZF:
+            tile = np.frombuffer(_lzf(stored[1:]), np.uint8).reshape(PIXEL_SIZE, TILE, TILE).transpose(1, 2, 0)
+        else:
+            tile = np.frombuffer(stored[1:], np.uint8).reshape(TILE, TILE, PIXEL_SIZE)
         canvas[top:bottom, left:right] = tile[top - y0:bottom - y0, left - x0:right - x0]
     return canvas
 
@@ -260,7 +262,7 @@ def _encode(pixels: np.ndarray, mask: np.ndarray) -> bytes:
         tile = np.zeros((TILE, TILE, PIXEL_SIZE), np.uint8)
         part = pixels[ty:ty + TILE, tx:tx + TILE]
         tile[:part.shape[0], :part.shape[1]] = part
-        records.append(f"{tx},{ty},LZF,{TILE_BYTES + 1}\n".encode() + bytes([RAW]) + tile.transpose(2, 0, 1).tobytes())
+        records.append(f"{tx},{ty},LZF,{TILE_BYTES + 1}\n".encode() + bytes([RAW]) + tile.tobytes())
     header = f"VERSION 2\nTILEWIDTH {TILE}\nTILEHEIGHT {TILE}\nPIXELSIZE {PIXEL_SIZE}\nDATA {len(records)}\n".encode()
     return header + b"".join(records)
 

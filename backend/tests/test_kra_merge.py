@@ -204,6 +204,21 @@ def test_a_layer_file_written_for_krita_reads_back(tmp_path):
     header, tiles = kra_merge._tiles(data)
     assert header["PIXELSIZE"] == "4" and len(tiles) == 4
     assert all(t[0] == kra_merge.RAW and len(t) == 64 * 64 * 4 + 1 for t in tiles.values())
+    # Krita keeps raw tiles pixel by pixel, not in planes: a wrong layout opens as stripes
+    first = tiles[(0, 0)]
+    assert first[1 + (5 * 64 + 3) * 4:1 + (5 * 64 + 4) * 4] == bytes((9, 8, 7, 200))
+
+
+def test_a_raw_tile_reads_pixel_by_pixel(tmp_path):
+    px = rgba((0, 0, 64, 64, (9, 8, 7, 200)))
+    path = kra(tmp_path / "raw.kra", [layer("s", "sky", rgba())])
+    with zipfile.ZipFile(path) as z:
+        files = {n: z.read(n) for n in z.namelist()}
+    files["Art/layers/layer2"] = kra_merge._encode(px, px[..., 3] > 0)
+    with zipfile.ZipFile(path, "w") as z:
+        for n, d in files.items():
+            z.writestr(n, d)
+    assert (pixels(path, "sky")[10, 10] == (9, 8, 7, 200)).all()
 
 
 @pytest.mark.parametrize("make", [
