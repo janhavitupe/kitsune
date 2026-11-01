@@ -194,7 +194,8 @@ export default function RepoPage({ repoId, onBack }: Props) {
               </option>
             ))}
           </select>
-          {branches.filter((br) => br.head_commit_id !== null).length > 1 && (
+          {(branches.filter((br) => br.head_commit_id !== null).length > 1 ||
+            commits.filter((c) => c.source_ext === "kra").length > 1) && (
             <button onClick={() => setMergeOpen(true)} className="rounded-md border border-zinc-700 px-3 py-1.5 text-sm hover:bg-zinc-900">
               Merge…
             </button>
