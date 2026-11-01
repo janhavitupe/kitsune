@@ -79,8 +79,6 @@ def test_branch_switch_and_merge_with_a_conflict(studio):
     studio.branch("pink", "v1")
 
     paint(ws.path, (TOP_LEFT, YELLOW))
-    with pytest.raises(cli.CliError, match="aren't committed"):
-        studio.switch("pink")
     studio.switch("pink", force=True)
     assert ws.branch == "pink" and pixel(ws.path, TOP_LEFT) != WHITE  # v1 loaded into the file
 
@@ -96,6 +94,35 @@ def test_branch_switch_and_merge_with_a_conflict(studio):
     assert m["merge_parent_id"] and m["branch"] == "main"
     assert pixel(ws.path, TOP_LEFT) == PINK and pixel(ws.path, BOTTOM_RIGHT) == YELLOW
     assert not ws.dirty()
+
+
+@pytest.mark.parametrize("start", [None, "v1"])  # from the latest version, and from an older one
+def test_unsaved_changes_come_along_to_a_branch(studio, start):
+    ws = studio.ws
+    paint(ws.path, (TOP_LEFT, WHITE))
+    studio.commit("white patch")
+    studio.branch("water", start)
+
+    paint(ws.path, (BOTTOM_RIGHT, YELLOW))
+    studio.switch("water")
+    assert ws.branch == "water" and ws.dirty()
+    assert pixel(ws.path, BOTTOM_RIGHT) == YELLOW  # the file wasn't touched
+
+    c = studio.commit("yellow corner")
+    assert c["branch"] == "water" and c["seq"] == 3 and not ws.dirty()
+
+    studio.switch("main")
+    assert pixel(ws.path, BOTTOM_RIGHT) != YELLOW  # main never got the changes
+    assert studio.head("main")["seq"] == 2
+
+
+def test_unsaved_changes_come_along_to_an_empty_branch(client, studio):
+    ws = studio.ws
+    ok = client.post(f"/api/repos/{ws.repo_id}/branches", json={"name": "fresh", "from_commit": None})
+    assert ok.status_code < 300
+    paint(ws.path, (TOP_LEFT, WHITE))
+    studio.switch("fresh")
+    assert ws.branch == "fresh" and ws.dirty() and pixel(ws.path, TOP_LEFT) == WHITE
 
 
 def test_checkout_and_pick(studio):

@@ -310,7 +310,12 @@ class Kitsune:
         ws = self.ws
         head = self.head(name)  # raises if the branch doesn't exist
         if ws.dirty() and not force:
-            raise CliError("The file has changes that aren't committed. Commit them, or switch with --force to drop them.")
+            # The file stays untouched, so the changes come along and nothing can be lost.
+            ws.branch = name
+            ws.save()
+            latest = f" (latest v{head['seq']})" if head else ""
+            self.out(f"On branch {name}{latest}. {ws.file} keeps your changes; `kitsune commit` saves it here as the next version.")
+            return
         ws.branch = name
         if head is None:
             self.out(f"On branch {name} (no versions yet).")

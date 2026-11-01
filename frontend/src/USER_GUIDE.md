@@ -151,6 +151,8 @@ Use the area names exactly as `kitsune diff` prints them when you run `kitsune p
 
 `checkout`, `switch` and `merge` can change your file on disk. **Reload it in your paint app afterwards**, or you'll be looking at the old picture.
 
+Painted something before making a branch? Switch to the branch anyway. Your file stays as it is, and `kitsune commit` saves it as the next version on that branch. To drop your changes and load the branch's latest version, use `kitsune switch water --force`.
+
 ### Going back to an old version
 
 ```bash
@@ -173,7 +175,7 @@ kitsune checkout v6 -o flat-version.png
 
 | What you see | What to do |
 | --- | --- |
-| "The file has changes that aren't committed" | Run `kitsune commit` first. Or add `--force` to throw those changes away, or use `-o` to write the old version to another file. |
+| "The file has changes that aren't committed" | Run `kitsune commit` first. Or add `--force` to throw those changes away, or use `-o` with `checkout` to write the old version to another file. |
 | "Commit your changes first" | Run `kitsune commit`, then try `kitsune pick` again. |
 | `kitsune commit` didn't make a version | Your file hasn't changed. Save it in your paint app first. |
 | "already has everything from…" | That branch is already part of this one, so there's nothing to merge. |
