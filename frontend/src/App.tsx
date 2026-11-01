@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import GuidePage from "./pages/GuidePage";
 import RepoPage from "./pages/RepoPage";
 import RepoPicker from "./pages/RepoPicker";
 
@@ -22,6 +23,8 @@ export default function App() {
     window.history.pushState(null, "", url);
     setRepoId(id);
   };
+
+  if (new URLSearchParams(window.location.search).has("guide")) return <GuidePage repoId={repoId} />;
 
   return repoId === null ? (
     <RepoPicker onOpen={open} />

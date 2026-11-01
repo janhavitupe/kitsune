@@ -6,7 +6,7 @@ Save versions of a painting, branch to try ideas, and see exactly what changed b
 
 > Built for the Meta Global AI Developer Hackathon (indie track), with Muse Code.
 
-**New here?** The [user guide](docs/USER_GUIDE.md) shows how to use Kitsune, in the browser and from the command line.
+**New here?** The [user guide](frontend/src/USER_GUIDE.md) shows how to use Kitsune, in the browser and from the command line.
 
 **Kitsune never makes art.** No model paints, repaints, inpaints or generates a single pixel. Every image Kitsune saves is made of the artist's own pixels: a bring-back copies the part *you drew* in one version into another, pixel for pixel, and leaves everything else exactly as you drew it. AI only *reads* your work (names regions, writes messages, transcribes notes, finds versions, plans steps) so you spend less time managing files and more time painting.
 

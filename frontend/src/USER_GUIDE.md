@@ -21,7 +21,7 @@ Saving a new version never overwrites an old one. Bring-backs, merges and palett
 - **In the browser:** upload your versions and work on them visually. This is the easiest way to start.
 - **From the command line:** use the `kitsune` command beside your paint app. This is quicker if you save often, and it can load old versions straight back into your file.
 
-Both show the same history, so you can mix them freely. Your Kitsune server needs to be running for either one.
+Both show the same history, so you can mix them freely.
 
 **File types:** Kitsune reads PNG, JPG, Photoshop `.psd`, Krita `.kra` and OpenRaster `.ora`. Use your paint app's own file if you can, because that keeps your layers. Procreate, Clip Studio and GIMP files need exporting to PNG first, which saves a flat image without layers.
 
@@ -100,17 +100,30 @@ Use the search bar above the timeline and describe what you're looking for, like
 
 ## Using the command line
 
-Once `kitsune` is installed, run commands from the folder that holds your painting.
+### Set it up
+
+You need Python 3.11 or newer. Install the `kitsune` command once:
+
+```bash
+pip install "git+https://github.com/janhavitupe/kitsune.git#subdirectory=cli"
+```
+
+Then open a terminal in the folder that holds your painting, and connect the painting to Kitsune. Do this once per painting:
+
+```bash
+kitsune init forest.kra --backend https://your-kitsune-server --web https://your-kitsune-site
+```
+
+If you run Kitsune on your own computer, leave out `--backend` and `--web`.
 
 ### Daily routine
 
 ```bash
-kitsune init forest.kra       # once, to start tracking this file
 kitsune commit -m "warmer sky"   # after each save in your paint app
-kitsune log                   # list your versions
+kitsune log                      # list your versions
 ```
 
-Run `kitsune init` once per painting. Leave out `-m` and Kitsune writes a message for you. To save a version automatically every time you save your file, run `kitsune watch` and leave it running. Press Ctrl+C to stop it.
+Leave out `-m` and Kitsune writes a message for you. To save a version automatically every time you save your file, run `kitsune watch` and leave it running. Press Ctrl+C to stop it.
 
 ### Common commands
 
@@ -170,7 +183,7 @@ kitsune checkout v6 -o flat-version.png
 | The picture didn't change after `checkout`, `switch` or `merge` | Reload the file in your paint app. |
 | A new version shows "Analyzing changes…" | Kitsune is still working it out in the background, so give it a moment. |
 | Areas are called "top-left area" and not "sky" | Kitsune names areas by position when its AI models aren't available. Everything still works. |
-| `kitsune` can't connect | Your Kitsune server isn't running, so start it and try again. |
+| `kitsune` can't connect | Check your internet connection and the server address you gave `kitsune init`. A hosted server can take a moment to respond. If you run Kitsune on your own computer, make sure it's started. |
 
 If you overwrite your tracked layered file by loading a version, the previous file is kept at `.kitsune/before-load.kra` (or `.psd`, `.ora`), and only the most recent one is kept.
 

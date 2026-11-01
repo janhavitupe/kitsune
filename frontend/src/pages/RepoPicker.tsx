@@ -30,7 +30,12 @@ export default function RepoPicker({ onOpen }: { onOpen: (id: number) => void })
       <h1 className="flex items-center gap-2 text-3xl font-semibold">
         <FoxMark className="size-9" /> Kitsune
       </h1>
-      <p className="mt-1 text-zinc-400">Version control for digital artists.</p>
+      <p className="mt-1 text-zinc-400">
+        Version control for digital artists.{" "}
+        <a href="?guide" className="text-orange-400 hover:underline">
+          Read the guide
+        </a>
+      </p>
 
       <form onSubmit={create} className="mt-8 flex gap-2">
         <input

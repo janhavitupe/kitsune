@@ -179,6 +179,9 @@ export default function RepoPage({ repoId, onBack }: Props) {
               </button>
             </>
           )}
+          <a href={`?guide&repo=${repoId}`} className="rounded-md border border-zinc-700 px-3 py-1.5 text-sm hover:bg-zinc-900">
+            Guide
+          </a>
           <label className="text-sm text-zinc-400" htmlFor="branch">
             Branch
           </label>
