@@ -4,7 +4,8 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from app.db import get_db, now, transaction
 from app.routers.common import get_repo_or_404, to_branch
-from app.schemas import Branch, BranchCreate, BranchUpdate
+from app.schemas import Branch, BranchCreate, BranchRewind, BranchRewound, BranchUpdate
+from app.services import commits
 
 router = APIRouter(tags=["branches"])
 
@@ -35,6 +36,19 @@ def update_branch(branch_id: int, body: BranchUpdate, conn: sqlite3.Connection =
         if body.kind:
             conn.execute("UPDATE branches SET kind = ? WHERE id = ?", (body.kind, branch_id))
     return to_branch(conn.execute("SELECT * FROM branches WHERE id = ?", (branch_id,)).fetchone())
+
+
+@router.post("/branches/{branch_id}/rewind", response_model=BranchRewound)
+def rewind_branch(branch_id: int, body: BranchRewind, conn: sqlite3.Connection = Depends(get_db)):
+    """Make an earlier version the branch's latest again. The versions after it are kept on a new branch."""
+    if conn.execute("SELECT 1 FROM branches WHERE id = ?", (branch_id,)).fetchone() is None:
+        raise HTTPException(404, f"Branch {branch_id} not found")
+    try:
+        kept = commits.rewind(conn, branch_id, body.to_commit)
+    except commits.CannotRewind as e:
+        raise HTTPException(409, str(e)) from e
+    rows = {r["id"]: r for r in conn.execute("SELECT * FROM branches WHERE id IN (?, ?)", (branch_id, kept))}
+    return {"branch": to_branch(rows[branch_id]), "kept": to_branch(rows[kept])}
 
 
 @router.post("/repos/{repo_id}/branches", status_code=201, response_model=Branch)

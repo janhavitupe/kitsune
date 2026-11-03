@@ -145,6 +145,84 @@ def test_checkout_and_pick(studio):
         studio.checkout("v2", None)
 
 
+def test_switch_to_a_version_saves_changes_first(studio):
+    ws = studio.ws
+    original = pixel(ws.path, TOP_LEFT)
+    paint(ws.path, (TOP_LEFT, WHITE))
+    studio.commit("white patch")
+    paint(ws.path, (TOP_LEFT, WHITE), (BOTTOM_RIGHT, YELLOW))  # not committed
+
+    studio.switch("v1")
+    assert studio.head()["seq"] == 3  # the yellow corner was saved on main before loading v1
+    assert ws.branch == "main" and pixel(ws.path, TOP_LEFT) == original and pixel(ws.path, BOTTOM_RIGHT) != YELLOW
+    c = studio.commit("back to the first look")
+    assert c["seq"] == 4 and c["parent_id"] == studio.version("v3")["id"]  # one line of history
+
+    paint(ws.path, (BOTTOM_RIGHT, PINK))
+    studio.switch("v2", force=True)  # --force drops the changes instead
+    assert studio.head()["seq"] == 4 and pixel(ws.path, TOP_LEFT) == WHITE and pixel(ws.path, BOTTOM_RIGHT) != PINK
+
+
+def test_rebase_keeps_later_versions_on_a_new_branch(client, studio):
+    ws = studio.ws
+    original = pixel(ws.path, TOP_LEFT)
+    paint(ws.path, (TOP_LEFT, WHITE))
+    studio.commit("white patch")
+    paint(ws.path, (TOP_LEFT, WHITE), (BOTTOM_RIGHT, YELLOW))
+    studio.commit("yellow corner")
+    paint(ws.path, (TOP_LEFT, WHITE), (BOTTOM_RIGHT, PINK))  # not committed
+
+    r = studio.rebase("v1")
+    assert r["kept"]["name"] == "main-before-v1"
+    assert studio.head()["seq"] == 1 and studio.head("main-before-v1")["seq"] == 4  # the pink corner was saved
+    assert {c["seq"]: c["branch"] for c in studio.commits()} == {
+        1: "main", 2: "main-before-v1", 3: "main-before-v1", 4: "main-before-v1"}
+    assert pixel(ws.path, TOP_LEFT) == original and not ws.dirty()
+
+    paint(ws.path, (BOTTOM_RIGHT, WHITE))
+    c = studio.commit("a new direction")
+    assert c["seq"] == 5 and c["branch"] == "main" and c["parent_id"] == studio.version("v1")["id"]
+
+    studio.switch("main-before-v1")  # the old line is still there to go back to
+    assert pixel(ws.path, BOTTOM_RIGHT) == PINK
+
+    with pytest.raises(cli.CliError, match="isn't in main-before-v1's history"):
+        studio.rebase("v5")
+    with pytest.raises(cli.CliError, match="already the latest"):
+        studio.rebase("v4")
+    studio.switch("main")
+    studio.rebase("v1")
+    assert "main-before-v1-2" in {b["name"] for b in studio.repo()["branches"]}  # names never clash
+
+
+def test_rebase_a_krita_file_brings_its_layers_back(client, tmp_path):
+    root = tmp_path / "kra"
+    root.mkdir()
+    kra = root / "painting.kra"
+
+    def save(layer: bytes):
+        out = io.BytesIO()
+        scene().save(out, format="PNG")
+        with zipfile.ZipFile(kra, "w") as z:
+            z.writestr("mimetype", "application/x-krita")
+            z.writestr("mergedimage.png", out.getvalue())
+            z.writestr("layers/layer1", layer)
+
+    save(b"v1 layer")
+    k = cli.Kitsune.init(client, root, kra, None, None, "http://testserver", "http://web", None, out=lambda *_: None)
+    v1_file = kra.read_bytes()
+    save(b"v2 layer")
+    k.commit("second", allow_same=True)
+    save(b"v3 layer")
+    k.commit("third", allow_same=True)
+
+    k.rebase("v1")
+    assert kra.read_bytes() == v1_file and not k.ws.dirty()
+    k.switch("main-before-v1")
+    with zipfile.ZipFile(kra) as z:
+        assert z.read("layers/layer1") == b"v3 layer"
+
+
 def test_notes_and_search(client, studio):
     paint(studio.ws.path, (TOP_LEFT, WHITE))
     studio.commit("warmer dusk sky")

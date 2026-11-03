@@ -93,6 +93,8 @@ cd my-painting-folder
 kitsune init forest.png            # first version; state goes in .kitsune/
 kitsune commit                     # after saving in your paint app; Muse Spark writes the message
 kitsune branch dusk --from v1 && kitsune switch dusk   # loads that version into forest.png
+kitsune switch v2                  # save your changes, then load v2 into the file
+kitsune rebase v2                  # make v2 the branch's latest again; later versions move to main-before-v2
 kitsune diff                       # named regions and how they changed
 kitsune merge dusk --take 0=source # conflicts are listed with their index
 kitsune merge v4                   # Krita files: bring back layers this branch has lost since v4
@@ -115,7 +117,7 @@ Before the demo: seed it (`--backend https://<render-url>`), click through every
 
 ```bash
 cd backend
-.venv/Scripts/python -m pytest        # 166 tests; model calls are faked, never real
+.venv/Scripts/python -m pytest        # 174 tests; model calls are faked, never real
 ```
 
 Other scripts: `scripts/probe_model_api.py` (check model ids and response shapes), `scripts/time_openweights.py` (Baseten vs Fireworks latency).

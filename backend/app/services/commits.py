@@ -48,6 +48,45 @@ def create(
     return commit_id
 
 
+class CannotRewind(ValueError):
+    pass
+
+
+def rewind(conn: sqlite3.Connection, branch_id: int, to_commit: int) -> int:
+    """Move a branch back to an earlier version of its own history, so the next commit continues
+    from there. Nothing is deleted: the versions after it move to a new branch named
+    "<branch>-before-v<n>", which keeps the old head. Returns that branch's id."""
+    with transaction(conn):
+        br = conn.execute("SELECT * FROM branches WHERE id = ?", (branch_id,)).fetchone()
+        target = conn.execute("SELECT * FROM commits WHERE id = ? AND repo_id = ?", (to_commit, br["repo_id"])).fetchone()
+        if target is None:
+            raise CannotRewind(f"Commit {to_commit} not found in this repo")
+        v = f"v{target['seq']}"
+        if br["head_commit_id"] == to_commit:
+            raise CannotRewind(f"{v} is already the latest version of {br['name']}")
+        # Walk first parents back from the head: the target must be on the branch's own history.
+        later, cur = [], br["head_commit_id"]
+        while cur is not None and cur != to_commit:
+            later.append(cur)
+            cur = conn.execute("SELECT parent_id FROM commits WHERE id = ?", (cur,)).fetchone()[0]
+        if cur is None:
+            raise CannotRewind(f"{v} isn't in {br['name']}'s history; start a branch from it instead")
+
+        name, n = f"{br['name']}-before-{v}", 1
+        while conn.execute("SELECT 1 FROM branches WHERE repo_id = ? AND name = ?", (br["repo_id"], name)).fetchone():
+            n += 1
+            name = f"{br['name']}-before-{v}-{n}"
+        kept = conn.execute(
+            "INSERT INTO branches (repo_id, name, head_commit_id, created_at) VALUES (?, ?, ?, ?)",
+            (br["repo_id"], name, br["head_commit_id"], now()),
+        ).lastrowid
+        # Only versions made on this branch move lanes; ones it got from a fast-forward stay where they are.
+        conn.executemany("UPDATE commits SET branch_id = ? WHERE id = ? AND branch_id = ?",
+                         [(kept, c, branch_id) for c in later])
+        conn.execute("UPDATE branches SET head_commit_id = ? WHERE id = ?", (to_commit, branch_id))
+    return kept
+
+
 class CannotDelete(ValueError):
     def __init__(self, message: str, status_code: int = 409):
         super().__init__(message)

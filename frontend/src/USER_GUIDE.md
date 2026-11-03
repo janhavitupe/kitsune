@@ -134,6 +134,8 @@ Leave out `-m` and Kitsune writes a message for you. To save a version automatic
 | See what changed in the last version | `kitsune diff` |
 | Compare two versions | `kitsune diff v3 v5` |
 | Load an old version into your file | `kitsune checkout v3` |
+| Save your changes, then load an old version | `kitsune switch v3` |
+| Make an old version this branch's latest again | `kitsune rebase v3` |
 | Save an old version as a separate file | `kitsune checkout v3 -o old.kra` |
 | Bring back one area | `kitsune pick "sky" --from v3` |
 | Create a branch from a version | `kitsune branch dusk --from v2` |
@@ -160,6 +162,15 @@ kitsune checkout v3
 ```
 
 Reload the file, paint if you like, then run `kitsune commit` to carry on from that point. Your later versions are all still there.
+
+Two shortcuts save whatever you've painted since your last commit first, so nothing is lost:
+
+```bash
+kitsune switch v2     # save your changes, then load v2. Your next commit goes on top of the latest version
+kitsune rebase v2     # save your changes, then make v2 the latest version of this branch again
+```
+
+After `rebase`, the versions that came after v2 move to a new branch called `main-before-v2` (named after your branch). You can switch to it any time. Add `--force` to either command to throw your changes away instead of saving them.
 
 ## Keeping your layers
 

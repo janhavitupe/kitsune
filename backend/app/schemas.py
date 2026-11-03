@@ -23,6 +23,15 @@ class BranchCreate(BaseModel):
     from_commit: int | None = None  # defaults to the head of main
 
 
+class BranchRewind(BaseModel):
+    to_commit: int
+
+
+class BranchRewound(BaseModel):
+    branch: Branch
+    kept: Branch  # holds the versions that came after, under the old head
+
+
 class BranchUpdate(BaseModel):
     name: str | None = Field(default=None, pattern=BRANCH_NAME_PATTERN)
     kind: Literal["normal", "explore", "discarded"] | None = None
