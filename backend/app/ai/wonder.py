@@ -5,6 +5,7 @@ import sqlite3
 
 from app.ai.cache import cached
 from app.ai.client import model_api
+from app.ai.spark import REASONING_TOKENS
 from app.config import settings
 
 
@@ -15,10 +16,12 @@ def chat(conn: sqlite3.Connection, messages: list[dict], tools: list[dict] | Non
     answers with a JSON object {"tool": ..., "arguments": ...} in its text instead, that is
     accepted too, so the agent works either way.
     """
-    inputs = {"task": "chat", "messages": messages, "tools": tools or []}
+    # v2: replies cut off by reasoning (see spark.REASONING_TOKENS) were cached empty.
+    inputs = {"task": "chat", "v": 2, "messages": messages, "tools": tools or []}
 
     def call() -> dict:
-        kwargs = {"model": settings.wonder_model, "messages": messages, "max_tokens": max_tokens, "temperature": 0.2}
+        kwargs = {"model": settings.wonder_model, "messages": messages, "max_tokens": max_tokens + REASONING_TOKENS,
+                  "temperature": 0.2}
         if tools:
             kwargs["tools"] = tools
         msg = model_api().chat.completions.create(**kwargs).choices[0].message
@@ -26,6 +29,8 @@ def chat(conn: sqlite3.Connection, messages: list[dict], tools: list[dict] | Non
             {"id": c.id, "name": c.function.name, "arguments": json.loads(c.function.arguments or "{}")}
             for c in (getattr(msg, "tool_calls", None) or [])
         ]
+        if not (msg.content or "").strip() and not calls:
+            raise ValueError(f"empty reply from {settings.wonder_model}")  # never cached; callers fall back
         return {"content": (msg.content or "").strip(), "tool_calls": calls}
 
     reply = cached(conn, settings.wonder_model, inputs, call)

@@ -23,6 +23,18 @@ def test_postprocess_names_figures_by_position():
     assert sorted(m.label for m in postprocess(raw)) == ["left figure", "right figure"]
 
 
+def test_postprocess_merges_instances_of_one_label():
+    raw = [
+        RawMask("hills", box_mask((0, 250, 250, 383))),
+        RawMask("hills", box_mask((260, 240, W - 1, 383))),
+        RawMask("figure", box_mask((20, 100, 100, 230))),
+    ]
+    kept = postprocess(raw)
+    assert sorted(m.label for m in kept) == ["figure", "hills"]
+    hills = next(m for m in kept if m.label == "hills")
+    assert hills.mask[300, 100] and hills.mask[300, 400]
+
+
 def test_regions_round_trip(conn):
     sha = storage.put_image(conn, _png(scene()))["sha256"]
     assert not has_regions(conn, sha)

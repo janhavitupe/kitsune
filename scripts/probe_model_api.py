@@ -89,17 +89,14 @@ def probe_spark(client: OpenAI, _args):
 
 
 def probe_sam(client: OpenAI, _args):
-    # Guess: SAM exposed through chat completions with an image and a text prompt.
-    # The answer we need: how masks come back (RLE? PNG? polygons?) and whether labels are included.
-    r = client.chat.completions.create(
+    # SAM is served on /v1/responses only (chat completions answers 404 "Use /v1/responses"). The
+    # reply is text: "<|box;x1=..;y1=..;x2=..;y2=..;w=..;h=..|><|mask;x=..;y=..;data=H,W,<encoded>|>".
+    r = client.responses.create(
         model=settings.sam_model,
-        messages=[{
-            "role": "user",
-            "content": [
-                {"type": "text", "text": "sky"},
-                {"type": "image_url", "image_url": {"url": data_uri(SKY_DAY)}},
-            ],
-        }],
+        input=[{"role": "user", "content": [
+            {"type": "input_text", "text": "sky"},
+            {"type": "input_image", "image_url": data_uri(SKY_DAY)},
+        ]}],
     )
     return dump(r)
 
@@ -107,8 +104,18 @@ def probe_sam(client: OpenAI, _args):
 def probe_voice(client: OpenAI, args):
     audio = Path(args.audio).read_bytes() if args.audio else silent_wav()
     name = Path(args.audio).name if args.audio else "tone.wav"
-    r = client.audio.transcriptions.create(model=settings.voice_model, file=(name, audio))
-    return dump(r)
+    # Not on /audio/transcriptions (404): a multipart POST to /v1/asr/transcribe, WAV only (16 or 24 kHz mono).
+    import httpx
+
+    request = {"mode": "PUSH_TO_TALK", "model": settings.voice_model, "audioEncoding": "WAV"}
+    r = httpx.post(
+        str(client.base_url).rstrip("/") + "/asr/transcribe",
+        headers={"Authorization": f"Bearer {settings.model_api_key}"},
+        files={"request": (None, json.dumps(request), "application/json"), "audio": (name, audio, "audio/wav")},
+        timeout=120,
+    )
+    r.raise_for_status()
+    return r.json()
 
 
 def probe_wonder(client: OpenAI, _args):

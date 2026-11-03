@@ -4,17 +4,20 @@ from scenes import scene
 
 from app.ai import spark, voice
 
+# What the browser uploads: recordings converted to WAV, the only format Voice Transcribe reads.
+WAV = b"RIFF\x24\x00\x00\x00WAVEfmt "
 
-def add(client, commit, kind="artist", text=None, audio=None, name="note.webm"):
+
+def add(client, commit, kind="artist", text=None, audio=None, name="note.wav"):
     data = {"kind": kind}
     if text is not None:
         data["text"] = text
-    files = {"audio": (name, audio, "audio/webm")} if audio is not None else None
+    files = {"audio": (name, audio, "audio/wav")} if audio is not None else None
     return client.post(f"/api/commits/{commit['id']}/notes", data=data, files=files)
 
 
-def fake_voice(text):
-    return SimpleNamespace(audio=SimpleNamespace(transcriptions=SimpleNamespace(create=lambda **kw: SimpleNamespace(text=text))))
+def fake_voice(monkeypatch, text):
+    monkeypatch.setattr(voice, "_request", lambda audio, filename: text)
 
 
 def fake_spark(text):
@@ -35,20 +38,28 @@ def test_typed_note(client, repo, upload):
 
 def test_recording_is_kept_until_it_can_be_transcribed(client, repo, upload, monkeypatch):
     v1 = upload(repo["id"], scene())
-    note = add(client, v1, audio=b"fake webm bytes").json()
+    note = add(client, v1, audio=WAV + b"recording").json()
     assert note["transcript"] is None and note["audio_url"]
-    assert client.get(note["audio_url"]).content == b"fake webm bytes"
+    assert client.get(note["audio_url"]).content == WAV + b"recording"
     assert client.post(f"/api/notes/{note['id']}/transcribe").status_code == 503  # no model yet
 
-    monkeypatch.setattr(voice, "model_api", lambda: fake_voice("Changed the sky because the client wanted dusk."))
+    fake_voice(monkeypatch, "Changed the sky because the client wanted dusk.")
     again = client.post(f"/api/notes/{note['id']}/transcribe").json()
     assert again["transcript"] == "Changed the sky because the client wanted dusk."
 
 
 def test_recording_transcribed_on_upload(client, repo, upload, monkeypatch):
-    monkeypatch.setattr(voice, "model_api", lambda: fake_voice("Pushed the rim light on the left figure."))
+    fake_voice(monkeypatch, "Pushed the rim light on the left figure.")
     v1 = upload(repo["id"], scene())
-    assert add(client, v1, audio=b"abc").json()["transcript"] == "Pushed the rim light on the left figure."
+    assert add(client, v1, audio=WAV + b"abc").json()["transcript"] == "Pushed the rim light on the left figure."
+
+
+def test_audio_the_browser_couldnt_convert_keeps_its_fallback(client, repo, upload, monkeypatch):
+    fake_voice(monkeypatch, "never reached")
+    v1 = upload(repo["id"], scene())
+    r = client.post(f"/api/commits/{v1['id']}/notes", data={"kind": "artist", "fallback_text": "darker hills"},
+                    files={"audio": ("note.webm", b"webm bytes", "audio/webm")})
+    assert r.json()["transcript"] == "darker hills" and r.json()["audio_url"]
 
 
 def test_long_client_feedback_is_summarized(client, repo, upload, monkeypatch):
@@ -78,11 +89,11 @@ def test_browser_transcript_is_only_a_fallback(client, repo, upload, monkeypatch
     v1 = upload(repo["id"], scene())
     # No Voice Transcribe: the browser's transcript is kept, and the note is searchable by it.
     r = client.post(f"/api/commits/{v1['id']}/notes", data={"kind": "artist", "fallback_text": "darkened the hills"},
-                    files={"audio": ("note.webm", b"abc", "audio/webm")})
+                    files={"audio": ("note.wav", WAV + b"abc", "audio/wav")})
     assert r.json()["transcript"] == "darkened the hills"
     assert [h["seq"] for h in client.get(f"/api/repos/{repo['id']}/search?q=hills").json()["results"]] == [1]
     # With Voice Transcribe, the model's transcript wins.
-    monkeypatch.setattr(voice, "model_api", lambda: fake_voice("Darkened the hills."))
+    fake_voice(monkeypatch, "Darkened the hills.")
     r = client.post(f"/api/commits/{v1['id']}/notes", data={"kind": "artist", "fallback_text": "dark and the hills"},
-                    files={"audio": ("note.webm", b"abcd", "audio/webm")})
+                    files={"audio": ("note.wav", WAV + b"abcd", "audio/wav")})
     assert r.json()["transcript"] == "Darkened the hills."

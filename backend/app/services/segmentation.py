@@ -1,7 +1,7 @@
-"""Named regions per blob: SAM 3.1 masks, post-processed and cached in the `regions` table (M2).
+"""Named regions per blob: SAM 3.1 boxes, post-processed and cached in the `regions` table (M2).
 
-SAM itself lives behind app.ai.sam. Until that is wired up (it waits on the Model API probe), no
-regions are stored and the diff falls back to position-named change areas ("top-left area").
+SAM itself lives behind app.ai.sam. Without a key no regions are stored, and the diff falls back
+to position-named change areas ("top-left area"), as it does for changes outside every region.
 """
 
 import io
@@ -22,11 +22,14 @@ from app.config import settings
 
 log = logging.getLogger("kitsune.segmentation")
 
-# Text prompts sent to SAM, one per label.
-VOCABULARY = [
-    "sky", "background", "foreground", "figure", "face", "hair", "eyes", "hands", "clothing",
-    "building", "tree", "water", "ground", "light source", "shadow", "text",
-]
+# {label shown to the artist: text prompt sent to SAM}. One SAM call per entry for each new image,
+# so only things worth naming in a diff. SAM wants plain nouns: it finds nothing for "figure" or
+# "light source" where "person" and "sun" work, and boxes for "background" or "shadow" would
+# cover the whole canvas.
+VOCABULARY = {
+    "sky": "sky", "sun": "sun", "figure": "person", "face": "face", "hair": "hair", "clothing": "clothing",
+    "animal": "animal", "tree": "tree", "building": "building", "water": "water", "hills": "hills",
+}
 SAME_LABEL_IOU = 0.8
 
 
@@ -66,6 +69,15 @@ def postprocess(raw: list[RawMask]) -> list[RawMask]:
         if any(k.label == m.label and _iou(k.mask, m.mask) > SAME_LABEL_IOU for k in kept):
             continue
         kept.append(m)
+
+    # SAM finds each hill or tree on its own; a diff reads better as "the hills" than as three of them.
+    merged: dict[str, RawMask] = {}
+    for m in kept:
+        if m.label != "figure" and m.label in merged:
+            merged[m.label].mask = merged[m.label].mask | m.mask
+        else:
+            merged[m.label if m.label != "figure" else f"figure {len(merged)}"] = m
+    kept = list(merged.values())
 
     figures = sorted((m for m in kept if m.label == "figure"), key=lambda m: _center_x(m.mask))
     if len(figures) > 1:
@@ -116,6 +128,9 @@ def segment_blob(conn: sqlite3.Connection, sha: str) -> None:
         raw = sam.segment(conn, sha, VOCABULARY)
     except (AIUnavailable, AIOffline) as e:
         log.info("segmentation skipped for %s: %s", sha[:12], e)
+        return
+    except Exception:  # a failed SAM call costs the names, never the diff; answers so far stay cached
+        log.warning("segmentation failed for %s", sha[:12], exc_info=True)
         return
     save_regions(conn, sha, postprocess(raw), source="sam-3.1")
 

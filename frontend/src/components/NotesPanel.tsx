@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { api, assetUrl, type Note, type NoteKind } from "../api/client";
 import { cx, timeAgo } from "../lib/format";
+import { toWav } from "../lib/wav";
 import VoiceRecorder from "./VoiceRecorder";
 
 interface Props {
@@ -33,7 +34,11 @@ export default function NotesPanel({ commitId, onChanged }: Props) {
     setBusy(true);
     setError(null);
     try {
-      const note = await api.addNote(commitId, kind, text, audio, audioName, heard);
+      // Voice Transcribe only reads WAV; keep the original if the browser can't convert it.
+      const wav = audio && (await toWav(audio));
+      const note = wav
+        ? await api.addNote(commitId, kind, text, wav, audioName.replace(/\.[^.]*$/, "") + ".wav", heard)
+        : await api.addNote(commitId, kind, text, audio, audioName, heard);
       setNotes((n) => [...n, note]);
       setText("");
       setAudio(null);

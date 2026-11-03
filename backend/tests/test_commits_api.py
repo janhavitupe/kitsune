@@ -91,7 +91,7 @@ def test_blob_endpoints(client, repo, upload):
 
 
 def test_analysis_cut_off_by_a_restart_is_resumed(client, conn, repo, upload, monkeypatch):
-    import threading
+    from types import SimpleNamespace
 
     from app import jobs
 
@@ -99,7 +99,9 @@ def test_analysis_cut_off_by_a_restart_is_resumed(client, conn, repo, upload, mo
     conn.execute("UPDATE commits SET analysis_status = 'running' WHERE id = ?", (v1["id"],))
     conn.commit()
     started = []
-    monkeypatch.setattr(threading, "Thread", lambda target, **kw: started.append(target) or type("T", (), {"start": lambda s: None})())
+    # Only jobs' own thread: patching threading.Thread itself would also stop thread pools used inside the analysis.
+    fake = SimpleNamespace(Thread=lambda target, **kw: started.append(target) or SimpleNamespace(start=lambda: None))
+    monkeypatch.setattr(jobs, "threading", fake)
     assert jobs.resume_unfinished() == [v1["id"]]
     started[0]()  # run what would have run in the background
     assert client.get(f"/api/commits/{v1['id']}").json()["analysis_status"] == "done"

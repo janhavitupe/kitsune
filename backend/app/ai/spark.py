@@ -12,6 +12,17 @@ from app.config import settings
 
 # Only what the prompt uses, so unrelated fields (polygons, bbox) don't change the cache key.
 PROMPT_FIELDS = ("label", "changed_ratio", "hints")
+# Spark 1.3 reasons before it answers (300-400 tokens for one sentence), and the reasoning counts
+# against max_tokens: with only the answer's budget, the reply is cut off before a word is written.
+REASONING_TOKENS = 1024
+
+
+def _text(r) -> str:
+    """The reply's text; an empty one raises, so it falls back like an error and is never cached."""
+    text = (r.choices[0].message.content or "").strip()
+    if not text:
+        raise ValueError(f"empty reply from {settings.spark_model} (finish_reason={r.choices[0].finish_reason})")
+    return text
 
 
 def commit_message(conn: sqlite3.Connection, a_sha: str, b_sha: str, regions: list[dict]) -> str:
@@ -24,18 +35,20 @@ def commit_message(conn: sqlite3.Connection, a_sha: str, b_sha: str, regions: li
             model=settings.spark_model,
             messages=prompts.commit_message_messages(storage.data_uri(conn, a_sha), storage.data_uri(conn, b_sha), top),
             temperature=0.3,
-            max_tokens=80,
+            max_tokens=80 + REASONING_TOKENS,
+            reasoning_effort="low",
         )
-        return {"text": (r.choices[0].message.content or "").strip().strip('"')}
+        return {"text": _text(r).strip('"')}
 
     return cached(conn, settings.spark_model, inputs, call)["text"]
 
 
 def _chat(messages: list[dict], max_tokens: int, temperature: float = 0.2) -> str:
     r = model_api().chat.completions.create(
-        model=settings.spark_model, messages=messages, temperature=temperature, max_tokens=max_tokens
+        model=settings.spark_model, messages=messages, temperature=temperature,
+        max_tokens=max_tokens + REASONING_TOKENS, reasoning_effort="low",
     )
-    return (r.choices[0].message.content or "").strip()
+    return _text(r)
 
 
 def _json(text: str, opener: str, closer: str):

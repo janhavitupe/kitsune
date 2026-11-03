@@ -1,7 +1,7 @@
 """Every prompt template in one place. Bump a *_VERSION when its prompt changes so cached results
 from the old prompt aren't reused."""
 
-COMMIT_MESSAGE_VERSION = 1
+COMMIT_MESSAGE_VERSION = 2  # 2: replies cut off by Spark's reasoning were cached empty
 
 COMMIT_MESSAGE_SYSTEM = """You write commit messages for a digital painter's version history.
 You get the previous version (image 1), the new version (image 2), and a measured list of the
@@ -26,7 +26,7 @@ Regions: whole canvas (88%, cooler, more muted)
 Message: Shifted the whole palette cooler and more muted for a moonlit mood."""
 
 
-NOTE_SUMMARY_VERSION = 1
+NOTE_SUMMARY_VERSION = 2  # 2: replies cut off by Spark's reasoning were cached empty
 
 NOTE_SUMMARY = {
     "artist": (
@@ -39,14 +39,14 @@ NOTE_SUMMARY = {
     ),
 }
 
-CAPTION_VERSION = 1
+CAPTION_VERSION = 2  # 2: replies cut off by Spark's reasoning were cached empty
 
 CAPTION = (
     "Describe this artwork in one or two sentences for a search index: subject, the main elements "
     "(sky, figures, hair, clothing, background), palette, lighting and mood. Plain words, no preamble."
 )
 
-QUERY_REWRITE_VERSION = 1
+QUERY_REWRITE_VERSION = 2  # 2: replies cut off by Spark's reasoning were cached empty
 
 QUERY_REWRITE = """Turn a search over an artist's version history into JSON.
 Fields:
@@ -64,7 +64,7 @@ Query: dusk palette
 Query: what did the hair look like after the client feedback
 {"relation": "after", "anchor": "client feedback", "terms": "hair"}"""
 
-EXPLORE_VERSION = 1
+EXPLORE_VERSION = 2  # 2: replies cut off by Spark's reasoning were cached empty
 
 EXPLORE_DIRECTIONS = """An artist asked to explore variations of their painting: "{prompt}".
 Give exactly three distinct palette or lighting directions, 2 to 5 words each, as a JSON list of strings.
