@@ -48,29 +48,39 @@ def create(
     return commit_id
 
 
-class CannotRewind(ValueError):
+class CannotRebase(ValueError):
     pass
 
 
-def rewind(conn: sqlite3.Connection, branch_id: int, to_commit: int) -> int:
-    """Move a branch back to an earlier version of its own history, so the next commit continues
-    from there. Nothing is deleted: the versions after it move to a new branch named
-    "<branch>-before-v<n>", which keeps the old head. Returns that branch's id."""
+def rebase(conn: sqlite3.Connection, branch_id: int, to_commit: int) -> int | None:
+    """Make any version of the piece the branch's latest, so the next commit continues from it.
+
+    Nothing is deleted. Versions of the branch that the new head isn't built on (everything after
+    an older version, or the branch's own work when jumping to another line) move to a new branch
+    named "<branch>-before-v<n>", which keeps the old head. Returns that branch's id, or None when
+    every version stays reachable (moving forward along a line the branch is part of)."""
     with transaction(conn):
         br = conn.execute("SELECT * FROM branches WHERE id = ?", (branch_id,)).fetchone()
         target = conn.execute("SELECT * FROM commits WHERE id = ? AND repo_id = ?", (to_commit, br["repo_id"])).fetchone()
         if target is None:
-            raise CannotRewind(f"Commit {to_commit} not found in this repo")
+            raise CannotRebase(f"Commit {to_commit} not found in this repo")
         v = f"v{target['seq']}"
         if br["head_commit_id"] == to_commit:
-            raise CannotRewind(f"{v} is already the latest version of {br['name']}")
-        # Walk first parents back from the head: the target must be on the branch's own history.
+            raise CannotRebase(f"{v} is already the latest version of {br['name']}")
+        built_on, todo = set(), [to_commit]  # the target and every version it's built on
+        while todo:
+            c = todo.pop()
+            if c is None or c in built_on:
+                continue
+            built_on.add(c)
+            todo += conn.execute("SELECT parent_id, merge_parent_id FROM commits WHERE id = ?", (c,)).fetchone()
         later, cur = [], br["head_commit_id"]
-        while cur is not None and cur != to_commit:
+        while cur is not None and cur not in built_on:
             later.append(cur)
             cur = conn.execute("SELECT parent_id FROM commits WHERE id = ?", (cur,)).fetchone()[0]
-        if cur is None:
-            raise CannotRewind(f"{v} isn't in {br['name']}'s history; start a branch from it instead")
+        if not later:
+            conn.execute("UPDATE branches SET head_commit_id = ? WHERE id = ?", (to_commit, branch_id))
+            return None
 
         name, n = f"{br['name']}-before-{v}", 1
         while conn.execute("SELECT 1 FROM branches WHERE repo_id = ? AND name = ?", (br["repo_id"], name)).fetchone():

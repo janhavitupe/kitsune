@@ -145,22 +145,78 @@ def test_checkout_and_pick(studio):
         studio.checkout("v2", None)
 
 
-def test_switch_to_a_version_saves_changes_first(studio):
+def test_switch_to_a_version(studio):
     ws = studio.ws
     original = pixel(ws.path, TOP_LEFT)
     paint(ws.path, (TOP_LEFT, WHITE))
     studio.commit("white patch")
     paint(ws.path, (TOP_LEFT, WHITE), (BOTTOM_RIGHT, YELLOW))  # not committed
 
-    studio.switch("v1")
+    with pytest.raises(cli.CliError, match="--commit"):  # nobody to ask: nothing happens without a choice
+        studio.switch("v1")
+    assert pixel(ws.path, BOTTOM_RIGHT) == YELLOW and studio.head()["seq"] == 2
+
+    studio.switch("v1", changes="commit")
     assert studio.head()["seq"] == 3  # the yellow corner was saved on main before loading v1
     assert ws.branch == "main" and pixel(ws.path, TOP_LEFT) == original and pixel(ws.path, BOTTOM_RIGHT) != YELLOW
     c = studio.commit("back to the first look")
     assert c["seq"] == 4 and c["parent_id"] == studio.version("v3")["id"]  # one line of history
 
     paint(ws.path, (BOTTOM_RIGHT, PINK))
-    studio.switch("v2", force=True)  # --force drops the changes instead
+    studio.switch("v2", force=True)  # --discard / --force drops the changes instead
     assert studio.head()["seq"] == 4 and pixel(ws.path, TOP_LEFT) == WHITE and pixel(ws.path, BOTTOM_RIGHT) != PINK
+    assert pixel(ws.root / ".kitsune" / "before-load.png", BOTTOM_RIGHT) == PINK  # but a copy is kept
+
+
+def test_asking_what_to_do_with_changes(studio):
+    ws = studio.ws
+    paint(ws.path, (TOP_LEFT, WHITE))
+    studio.commit("white patch")
+    answers = iter(["", ""])
+    studio.ask = lambda prompt: next(answers)
+    paint(ws.path, (BOTTOM_RIGHT, YELLOW))
+    with pytest.raises(cli.CliError, match="Cancelled"):
+        studio.switch("v1")
+    assert ws.dirty() and studio.head()["seq"] == 2
+
+    answers = iter(["2", ""])  # a new branch, with the suggested name
+    studio.switch("v1")
+    assert studio.head("main-changes")["seq"] == 3 and studio.head("main-changes")["parent_id"] == studio.version("v2")["id"]
+    assert ws.branch == "main" and studio.head()["seq"] == 2 and pixel(ws.path, BOTTOM_RIGHT) != YELLOW
+
+    answers = iter(["2", ""])
+    paint(ws.path, (BOTTOM_RIGHT, PINK))
+    studio.switch("v2")
+    assert studio.head("main-changes-2")["seq"] == 4  # the suggested name never clashes
+
+    answers = iter(["1"])
+    paint(ws.path, (BOTTOM_RIGHT, YELLOW))
+    studio.rebase("v1")
+    assert studio.head("main-before-v1")["seq"] == 5  # committed on main, then kept when main moved to v1
+
+
+def test_rebase_forward_and_onto_another_line(studio):
+    """The artist's case: rebase back to v2, draw, then rebase to v4, which only the kept branch has."""
+    ws = studio.ws
+    for color in (WHITE, YELLOW, PINK):
+        paint(ws.path, (TOP_LEFT, color))
+        studio.commit(None)  # v2, v3, v4
+    studio.rebase("v2")
+    paint(ws.path, (BOTTOM_RIGHT, YELLOW))  # the cat
+
+    r = studio.rebase("v4", changes="branch", new_branch="cat")
+    assert r["kept"] is None  # moving forward leaves nothing behind
+    assert studio.head()["seq"] == 4 and pixel(ws.path, TOP_LEFT) == PINK and not ws.dirty()
+    assert studio.head("cat")["seq"] == 5 and studio.head("cat")["parent_id"] == studio.version("v2")["id"]
+
+    studio.branch("night", "v1")
+    studio.switch("night")
+    paint(ws.path, (BOTTOM_RIGHT, WHITE))
+    studio.commit("star")  # v6, on its own line from v1
+    studio.switch("main")
+    r = studio.rebase("v6")
+    assert r["kept"]["name"] == "main-before-v6" and studio.head("main-before-v6")["seq"] == 4
+    assert studio.head()["seq"] == 6 and pixel(ws.path, BOTTOM_RIGHT) == WHITE
 
 
 def test_rebase_keeps_later_versions_on_a_new_branch(client, studio):
@@ -172,7 +228,7 @@ def test_rebase_keeps_later_versions_on_a_new_branch(client, studio):
     studio.commit("yellow corner")
     paint(ws.path, (TOP_LEFT, WHITE), (BOTTOM_RIGHT, PINK))  # not committed
 
-    r = studio.rebase("v1")
+    r = studio.rebase("v1", changes="commit")
     assert r["kept"]["name"] == "main-before-v1"
     assert studio.head()["seq"] == 1 and studio.head("main-before-v1")["seq"] == 4  # the pink corner was saved
     assert {c["seq"]: c["branch"] for c in studio.commits()} == {
@@ -186,8 +242,6 @@ def test_rebase_keeps_later_versions_on_a_new_branch(client, studio):
     studio.switch("main-before-v1")  # the old line is still there to go back to
     assert pixel(ws.path, BOTTOM_RIGHT) == PINK
 
-    with pytest.raises(cli.CliError, match="isn't in main-before-v1's history"):
-        studio.rebase("v5")
     with pytest.raises(cli.CliError, match="already the latest"):
         studio.rebase("v4")
     studio.switch("main")

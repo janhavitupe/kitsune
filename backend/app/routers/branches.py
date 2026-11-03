@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from app.db import get_db, now, transaction
 from app.routers.common import get_repo_or_404, to_branch
-from app.schemas import Branch, BranchCreate, BranchRewind, BranchRewound, BranchUpdate
+from app.schemas import Branch, BranchCreate, BranchRebase, BranchRebased, BranchUpdate
 from app.services import commits
 
 router = APIRouter(tags=["branches"])
@@ -38,17 +38,17 @@ def update_branch(branch_id: int, body: BranchUpdate, conn: sqlite3.Connection =
     return to_branch(conn.execute("SELECT * FROM branches WHERE id = ?", (branch_id,)).fetchone())
 
 
-@router.post("/branches/{branch_id}/rewind", response_model=BranchRewound)
-def rewind_branch(branch_id: int, body: BranchRewind, conn: sqlite3.Connection = Depends(get_db)):
-    """Make an earlier version the branch's latest again. The versions after it are kept on a new branch."""
+@router.post("/branches/{branch_id}/rebase", response_model=BranchRebased)
+def rebase_branch(branch_id: int, body: BranchRebase, conn: sqlite3.Connection = Depends(get_db)):
+    """Make any version the branch's latest. Versions it would leave behind are kept on a new branch."""
     if conn.execute("SELECT 1 FROM branches WHERE id = ?", (branch_id,)).fetchone() is None:
         raise HTTPException(404, f"Branch {branch_id} not found")
     try:
-        kept = commits.rewind(conn, branch_id, body.to_commit)
-    except commits.CannotRewind as e:
+        kept = commits.rebase(conn, branch_id, body.to_commit)
+    except commits.CannotRebase as e:
         raise HTTPException(409, str(e)) from e
     rows = {r["id"]: r for r in conn.execute("SELECT * FROM branches WHERE id IN (?, ?)", (branch_id, kept))}
-    return {"branch": to_branch(rows[branch_id]), "kept": to_branch(rows[kept])}
+    return {"branch": to_branch(rows[branch_id]), "kept": to_branch(rows[kept]) if kept else None}
 
 
 @router.post("/repos/{repo_id}/branches", status_code=201, response_model=Branch)

@@ -23,13 +23,13 @@ class BranchCreate(BaseModel):
     from_commit: int | None = None  # defaults to the head of main
 
 
-class BranchRewind(BaseModel):
+class BranchRebase(BaseModel):
     to_commit: int
 
 
-class BranchRewound(BaseModel):
+class BranchRebased(BaseModel):
     branch: Branch
-    kept: Branch  # holds the versions that came after, under the old head
+    kept: Branch | None  # the versions the new head isn't built on, under the old head; None if there were none
 
 
 class BranchUpdate(BaseModel):

@@ -13,8 +13,10 @@ switch and checkout put back exactly what you saved.
     kitsune diff                            what changed in the last version (or: diff v3 v5)
     kitsune branch red-coat --from v2       new branch; `kitsune branch` lists them
     kitsune switch red-coat                 change branch and load its latest version into the file
-    kitsune switch v2                       save your changes, then load v2 into the file
-    kitsune rebase v2                       save your changes, then make v2 this branch's latest again
+    kitsune switch v2                       load v2 into the file
+    kitsune rebase v4                       make v4 this branch's latest (any version, on any line)
+                                            both ask what to do with uncommitted changes, or take
+                                            --commit, --new-branch NAME or --discard
     kitsune checkout v3                     load an old version into the file (or -o elsewhere.kra)
     kitsune pick sky --from v3              bring the sky from v3 into this branch
     kitsune merge red-coat                  merge a branch into the current one
@@ -120,10 +122,11 @@ def title(c: dict) -> str:
 class Kitsune:
     """Each command is a method. `api` is any httpx.Client pointed at the backend (tests pass a TestClient)."""
 
-    def __init__(self, api: httpx.Client, ws: Workspace | None, out=print):
+    def __init__(self, api: httpx.Client, ws: Workspace | None, out=print, ask=None):
         self.api = api
         self.ws = ws
         self.out = out
+        self.ask = ask  # input() when someone is at the terminal to answer questions, else None
 
     # --- lookups -------------------------------------------------------------------------------
 
@@ -308,10 +311,10 @@ class Kitsune:
                          json={"name": name, "from_commit": src["id"] if src else None}))
         self.out(f"Created branch {name}" + (f" from v{src['seq']}" if src else "") + f". `kitsune switch {name}` to work on it.")
 
-    def switch(self, name: str, force: bool = False) -> None:
+    def switch(self, name: str, force: bool = False, changes: str | None = None, new_branch: str | None = None) -> None:
         ws = self.ws
         if re.fullmatch(r"[vV]\d+", name) and not any(b["name"] == name for b in self.repo()["branches"]):
-            return self.switch_version(name, force)
+            return self.switch_version(name, changes or ("discard" if force else None), new_branch)
         head = self.head(name)  # raises if the branch doesn't exist
         if ws.dirty() and not force:
             # The file stays untouched, so the changes come along and nothing can be lost.
@@ -346,57 +349,86 @@ class Kitsune:
         self._load_into_file(c)
         self.out(f"Loaded v{c['seq']} into {self.ws.file}. Commit to continue from it on {self.ws.branch}.")
 
-    def switch_version(self, ref: str, force: bool = False) -> None:
-        """Load a version into the file, after saving any changes as a version on this branch.
-        The next commit adds it on top, so history stays in one line."""
+    def switch_version(self, ref: str, changes: str | None = None, new_branch: str | None = None) -> None:
+        """Load a version into the file, once uncommitted changes are dealt with. The next commit adds
+        it on top of this branch's latest, so history stays in one line."""
         ws = self.ws
         c = self.version(ref)
         if not self.can_load(c):
             raise CliError(NO_LAYERS.format(v=c["seq"]))
-        if not force:
-            self._commit_changes_first()
+        self._settle_changes(f"loading v{c['seq']}", changes, new_branch)
         self._load_into_file(c)
         self.out(f"Loaded v{c['seq']} into {ws.file}; reload it in your paint app. `kitsune commit` saves it as the "
-                 f"next version on {ws.branch}, or `kitsune rebase v{c['seq']}` makes v{c['seq']} {ws.branch}'s latest again.")
+                 f"next version on {ws.branch}, or `kitsune rebase v{c['seq']}` makes v{c['seq']} {ws.branch}'s latest.")
 
-    def rebase(self, ref: str, force: bool = False) -> dict:
-        """Move this branch back to one of its earlier versions and load it into the file. The versions
-        after it aren't deleted: they move to a new branch, "<branch>-before-v<n>"."""
+    def rebase(self, ref: str, changes: str | None = None, new_branch: str | None = None) -> dict:
+        """Make any version this branch's latest and load it into the file. Versions of the branch the
+        new head isn't built on aren't deleted: they move to a new branch, "<branch>-before-v<n>"."""
         ws = self.ws
-        commits = self.commits()
-        c = self.version(ref, commits)
+        c = self.version(ref)
         if not self.can_load(c):
             raise CliError(NO_LAYERS.format(v=c["seq"]))
         head = self.head()
-        by_id = {x["id"]: x for x in commits}
-        cur = head
-        while cur is not None and cur["id"] != c["id"]:
-            cur = by_id.get(cur["parent_id"])
-        if cur is None:
-            raise CliError(f"v{c['seq']} isn't in {ws.branch}'s history. `kitsune branch <name> --from v{c['seq']}` to start from it.")
-        if head["id"] == c["id"] and (force or not ws.dirty()):
-            if not ws.dirty():
-                raise CliError(f"v{c['seq']} is already the latest version of {ws.branch}")
-            ws.synced[ws.branch] = self._load_into_file(c)
-            ws.save()
-            self.out(f"Dropped your changes: {ws.file} is back at v{c['seq']}.")
-            return {}
-        if not force:
-            self._commit_changes_first()
-        br = next(b for b in self.repo()["branches"] if b["name"] == ws.branch)
-        r = ok(self.api.post(f"/api/branches/{br['id']}/rewind", json={"to_commit": c["id"]}))
-        kept = r["kept"]["name"]
-        ws.synced[kept] = ws.synced.get(ws.branch, "")
+        if head and head["id"] == c["id"] and not ws.dirty():
+            raise CliError(f"v{c['seq']} is already the latest version of {ws.branch}")
+        self._settle_changes(f"rebasing {ws.branch} to v{c['seq']}", changes, new_branch)
+        r, kept = {}, None
+        head = self.head()
+        if head is None or head["id"] != c["id"]:  # it can be the head already, when the changes were dropped
+            br = next(b for b in self.repo()["branches"] if b["name"] == ws.branch)
+            r = ok(self.api.post(f"/api/branches/{br['id']}/rebase", json={"to_commit": c["id"]}))
+            kept = r["kept"] and r["kept"]["name"]
+        if kept:
+            ws.synced[kept] = ws.synced.get(ws.branch, "")
         ws.synced[ws.branch] = self._load_into_file(c)
         ws.save()
-        self.out(f"{ws.branch} is back at v{c['seq']}, loaded into {ws.file}; reload it in your paint app. "
-                 f"The later versions are kept on branch {kept}.")
+        self.out(f"{ws.branch} is now at v{c['seq']}, loaded into {ws.file}; reload it in your paint app."
+                 + (f" The versions it had that v{c['seq']} isn't built on are kept on branch {kept}." if kept else ""))
         return r
 
-    def _commit_changes_first(self) -> None:
-        if self.ws.dirty():
-            self.out(f"Saving your changes on {self.ws.branch} first:")
+    def _settle_changes(self, before: str, changes: str | None, new_branch: str | None) -> None:
+        """Deal with uncommitted changes before the file is replaced: "commit" them on this branch,
+        commit them on a new "branch", or "discard" them. None asks, when there is someone to ask."""
+        ws = self.ws
+        if not ws.dirty():
+            return
+        if changes is None:
+            if self.ask is None:
+                raise CliError(f"{ws.file} has changes that aren't committed. Run again with --commit (save them on "
+                               f"{ws.branch}), --new-branch NAME (save them on a new branch) or --discard.")
+            head = self.head()
+            here = f"{ws.branch}, after v{head['seq']}" if head else ws.branch
+            self.out(f"{ws.file} has changes that aren't committed. Before {before}, what should happen to them?")
+            self.out(f"  1) commit them on {here}")
+            self.out("  2) commit them on a new branch")
+            self.out("  3) discard them")
+            changes = {"1": "commit", "2": "branch", "3": "discard"}.get(self.ask("Choose 1, 2 or 3 (anything else cancels): ").strip())
+            if changes is None:
+                raise CliError("Cancelled. Nothing was changed.")
+        if changes == "branch":
+            if not new_branch:
+                if self.ask is None:
+                    raise CliError("Name the new branch: --new-branch NAME")
+                names = {b["name"] for b in self.repo()["branches"]}
+                default, n = f"{ws.branch}-changes", 1
+                while default in names:
+                    n += 1
+                    default = f"{ws.branch}-changes-{n}"
+                new_branch = self.ask(f"Name for the new branch [{default}]: ").strip() or default
+            here = ws.branch
+            self.branch(new_branch, None)  # starts at this branch's latest, so the changes land right after it
+            ws.branch, ws.synced[new_branch] = new_branch, ws.synced.get(here, "")
+            try:
+                self.commit(None, wait_s=0)
+            finally:
+                ws.branch = here
+                ws.save()
+        elif changes == "commit":
             self.commit(None, wait_s=0)
+        else:
+            backup = ws.root / STATE_DIR / f"before-load{ws.path.suffix}"
+            backup.write_bytes(ws.path.read_bytes())
+            self.out(f"Discarding your changes (a copy is in {backup.relative_to(ws.root).as_posix()}).")
 
     def can_load(self, c: dict) -> bool:
         return self.has_layers_for(c, self.ws.path) or self.ws.path.suffix.lower() == ".png"
@@ -551,13 +583,19 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("name", nargs="?")
     s.add_argument("--from", dest="from_ref", help="version to branch from (default: this branch's latest)")
 
+    def changes_flags(s):
+        g = s.add_mutually_exclusive_group()
+        g.add_argument("--commit", action="store_true", help="commit uncommitted changes on this branch first")
+        g.add_argument("--new-branch", metavar="NAME", help="commit uncommitted changes on a new branch first")
+        g.add_argument("--discard", "--force", dest="discard", action="store_true", help="throw uncommitted changes away")
+
     s = sub.add_parser("switch", help="change branch and load its latest image, or load a version (switch v2)")
     s.add_argument("name", help="a branch, or a version like v2")
-    s.add_argument("--force", action="store_true", help="drop uncommitted changes instead of saving them")
+    changes_flags(s)
 
-    s = sub.add_parser("rebase", help="make an earlier version this branch's latest again; later ones are kept on a new branch")
+    s = sub.add_parser("rebase", help="make any version this branch's latest; versions left behind are kept on a new branch")
     s.add_argument("version")
-    s.add_argument("--force", action="store_true", help="drop uncommitted changes instead of saving them")
+    changes_flags(s)
 
     s = sub.add_parser("checkout", help="load an old version into the file")
     s.add_argument("version")
@@ -597,7 +635,10 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         ws = Workspace.find(Path.cwd())
         with httpx.Client(base_url=ws.backend, timeout=120) as api:
-            k = Kitsune(api, ws)
+            k = Kitsune(api, ws, ask=input if sys.stdin.isatty() else None)
+            changes = None
+            if args.cmd in ("switch", "rebase"):
+                changes = "commit" if args.commit else "branch" if args.new_branch else "discard" if args.discard else None
             match args.cmd:
                 case "commit":
                     k.commit(args.message, wait_s=0 if args.no_wait else 20, allow_same=args.allow_same)
@@ -610,9 +651,9 @@ def main(argv: list[str] | None = None) -> int:
                 case "branch":
                     k.branch(args.name, args.from_ref)
                 case "switch":
-                    k.switch(args.name, args.force)
+                    k.switch(args.name, args.discard, changes, args.new_branch)
                 case "rebase":
-                    k.rebase(args.version, args.force)
+                    k.rebase(args.version, changes, args.new_branch)
                 case "checkout":
                     k.checkout(args.version, args.output, args.force)
                 case "pick":
