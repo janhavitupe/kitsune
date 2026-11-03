@@ -117,7 +117,7 @@ Before the demo: seed it (`--backend https://<render-url>`), click through every
 
 ```bash
 cd backend
-.venv/Scripts/python -m pytest        # 186 tests; model calls are faked, never real
+.venv/Scripts/python -m pytest        # 187 tests; model calls are faked, never real
 ```
 
 Other scripts: `scripts/probe_model_api.py` (check model ids and response shapes), `scripts/time_openweights.py` (Baseten vs Fireworks latency).

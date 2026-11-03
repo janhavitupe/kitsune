@@ -12,6 +12,8 @@ switch and checkout put back exactly what you saved.
     kitsune log                             versions on this branch (--all for every branch)
     kitsune diff                            what changed in the last version (or: diff v3 v5)
     kitsune branch red-coat --from v2       new branch; `kitsune branch` lists them
+    kitsune branch -d red-coat              delete a branch (asks before deleting versions only it has)
+    kitsune branch --prune                  delete every branch with no versions of its own
     kitsune switch red-coat                 change branch and load its latest version into the file
     kitsune switch v2                       load v2 into the file
     kitsune rebase v4                       make v4 this branch's latest (any version, on any line)
@@ -311,6 +313,37 @@ class Kitsune:
                          json={"name": name, "from_commit": src["id"] if src else None}))
         self.out(f"Created branch {name}" + (f" from v{src['seq']}" if src else "") + f". `kitsune switch {name}` to work on it.")
 
+    def delete_branches(self, names: list[str], yes: bool = False) -> None:
+        """Delete branches and the versions only they have; versions other branches use are kept."""
+        branches = {b["name"]: b for b in self.repo()["branches"]}
+        for name in names:
+            if name not in branches:
+                raise CliError(f"No branch '{name}'")
+        own = {n: [c["seq"] for c in self.commits() if c["branch"] == n] for n in names}
+        if any(own.values()) and not yes:
+            listed = ", ".join(f"{n} (v{', v'.join(map(str, vs))})" for n, vs in own.items() if vs)
+            if self.ask is None:
+                raise CliError(f"{listed} would lose versions only they have; add -y to delete anyway")
+            if self.ask(f"Delete {listed}? Versions no other branch uses are deleted too. [y/N] ").strip().lower() not in ("y", "yes"):
+                raise CliError("Cancelled. Nothing was changed.")
+        for name in names:
+            gone = ok(self.api.delete(f"/api/branches/{branches[name]['id']}"))["deleted_versions"]
+            self.ws.synced.pop(name, None)
+            self.out(f"Deleted branch {name}" + (f" and v{', v'.join(map(str, gone))}." if gone else "."))
+        if self.ws.branch in names:
+            self.ws.branch = "main"  # the file is left as it is
+            self.out(f"You were on it, so you're on main now. {self.ws.file} is unchanged.")
+        self.ws.save()
+
+    def prune(self) -> None:
+        """Delete every branch with no versions of its own."""
+        made_on = {c["branch"] for c in self.commits()}
+        empty = [b["name"] for b in self.repo()["branches"] if b["name"] != "main" and b["name"] not in made_on]
+        if not empty:
+            self.out("No empty branches.")
+            return
+        self.delete_branches(empty, yes=True)
+
     def switch(self, name: str, force: bool = False, changes: str | None = None, new_branch: str | None = None) -> None:
         ws = self.ws
         if re.fullmatch(r"[vV]\d+", name) and not any(b["name"] == name for b in self.repo()["branches"]):
@@ -579,9 +612,12 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("a", nargs="?")
     s.add_argument("b", nargs="?")
 
-    s = sub.add_parser("branch", help="list branches, or create one")
-    s.add_argument("name", nargs="?")
+    s = sub.add_parser("branch", help="list branches, create one, or delete some (-d)")
+    s.add_argument("name", nargs="*")
     s.add_argument("--from", dest="from_ref", help="version to branch from (default: this branch's latest)")
+    s.add_argument("-d", "--delete", action="store_true", help="delete the named branches and the versions only they have")
+    s.add_argument("-y", "--yes", action="store_true", help="with -d: don't ask before deleting versions")
+    s.add_argument("--prune", action="store_true", help="delete every branch with no versions of its own")
 
     def changes_flags(s):
         g = s.add_mutually_exclusive_group()
@@ -648,8 +684,16 @@ def main(argv: list[str] | None = None) -> int:
                     k.log(args.all, args.n)
                 case "diff":
                     k.diff(args.a, args.b)
+                case "branch" if args.prune:
+                    k.prune()
+                case "branch" if args.delete:
+                    if not args.name:
+                        raise CliError("Name the branches to delete: kitsune branch -d NAME")
+                    k.delete_branches(args.name, args.yes)
                 case "branch":
-                    k.branch(args.name, args.from_ref)
+                    if len(args.name) > 1:
+                        raise CliError("Name one branch to create (or -d to delete several)")
+                    k.branch(args.name[0] if args.name else None, args.from_ref)
                 case "switch":
                     k.switch(args.name, args.discard, changes, args.new_branch)
                 case "rebase":

@@ -38,6 +38,15 @@ def update_branch(branch_id: int, body: BranchUpdate, conn: sqlite3.Connection =
     return to_branch(conn.execute("SELECT * FROM branches WHERE id = ?", (branch_id,)).fetchone())
 
 
+@router.delete("/branches/{branch_id}")
+def delete_branch(branch_id: int, conn: sqlite3.Connection = Depends(get_db)):
+    """Delete a branch and the versions only it has; versions other branches use are kept."""
+    try:
+        return {"deleted_versions": commits.delete_branch(conn, branch_id)}
+    except commits.CannotDelete as e:
+        raise HTTPException(e.status_code, str(e)) from e
+
+
 @router.post("/branches/{branch_id}/rebase", response_model=BranchRebased)
 def rebase_branch(branch_id: int, body: BranchRebase, conn: sqlite3.Connection = Depends(get_db)):
     """Make any version the branch's latest. Versions it would leave behind are kept on a new branch."""

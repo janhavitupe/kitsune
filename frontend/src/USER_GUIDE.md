@@ -141,6 +141,8 @@ Leave out `-m` and Kitsune writes a message for you. To save a version automatic
 | Create a branch from a version | `kitsune branch dusk --from v2` |
 | Move to a branch | `kitsune switch dusk` |
 | See your branches | `kitsune branch` |
+| Delete a branch | `kitsune branch -d dusk` (asks first if versions only it has would go; `-y` skips asking) |
+| Delete every empty branch | `kitsune branch --prune` (branches with no versions of their own) |
 | Merge a branch into your current one | `kitsune merge dusk` |
 | Choose sides in a merge conflict | `kitsune merge dusk --take 0=source,1=target` |
 | Get back lost Krita layers | `kitsune merge v4` |

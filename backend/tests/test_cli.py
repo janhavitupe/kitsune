@@ -389,3 +389,34 @@ def test_merging_an_older_version_is_told_from_a_branch(studio):
         studio.merge("v9", {})
     with pytest.raises(cli.CliError, match="nope"):
         studio.merge("nope", {})
+
+
+def test_delete_branches_and_prune_empty_ones(client, studio):
+    ws = studio.ws
+    studio.branch("empty", None)
+    studio.branch("also-empty", "v1")
+    studio.branch("pink", None)
+    studio.switch("pink")
+    paint(ws.path, (TOP_LEFT, PINK))
+    studio.commit("pink patch")
+
+    studio.lines.clear()
+    studio.prune()  # no versions of their own, so nothing is lost
+    assert [b["name"] for b in studio.repo()["branches"]] == ["main", "pink"]
+    studio.branch("from-pink", None)  # built on pink's v2, so v2 must outlive pink
+
+    # Not on a terminal, so it won't delete versions without -y.
+    with pytest.raises(cli.CliError, match="-y"):
+        studio.delete_branches(["pink"])
+    studio.delete_branches(["pink"], yes=True)
+    assert "Deleted branch pink." in studio.lines  # v2 is kept: from-pink is built on it
+    assert ws.branch == "main"
+    v2 = next(c for c in studio.commits() if c["seq"] == 2)
+    assert v2["branch"] == "from-pink"
+
+    studio.ask = lambda prompt: "y"
+    studio.delete_branches(["from-pink"])
+    assert studio.lines[-1] == "Deleted branch from-pink and v2."
+    assert [c["seq"] for c in studio.commits()] == [1]
+    with pytest.raises(cli.CliError, match="main can't be deleted"):
+        studio.delete_branches(["main"], yes=True)

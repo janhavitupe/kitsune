@@ -108,31 +108,72 @@ def delete(conn: sqlite3.Connection, commit_id: int) -> None:
     that ended at it end there instead (an empty branch if it was the first). Its notes go with it,
     and its image and layered file too unless another version uses them."""
     with transaction(conn):
-        c = conn.execute("SELECT * FROM commits WHERE id = ?", (commit_id,)).fetchone()
-        if c is None:
-            raise CannotDelete(f"Commit {commit_id} not found", 404)
-        parent = c["parent_id"]
-        conn.execute("UPDATE commits SET parent_id = ? WHERE parent_id = ?", (parent, commit_id))
-        # A merge of the deleted version now merges the one before it, unless that's already its parent.
-        conn.execute("UPDATE commits SET merge_parent_id = CASE WHEN parent_id IS ? THEN NULL ELSE ? END"
-                     " WHERE merge_parent_id = ?", (parent, parent, commit_id))
-        conn.execute("UPDATE branches SET head_commit_id = ? WHERE head_commit_id = ?", (parent, commit_id))
-
-        files = [r[0] for r in conn.execute("SELECT audio_path FROM voice_notes WHERE commit_id = ? AND audio_path IS NOT NULL", (commit_id,))]
-        conn.execute("UPDATE merges SET base_commit = NULL WHERE base_commit = ?", (commit_id,))
-        # Includes the diffs of versions that were built on it; they're recomputed against their new parent.
-        conn.execute("DELETE FROM diffs WHERE from_commit = ? OR to_commit = ?", (commit_id, commit_id))
-        conn.execute("DELETE FROM voice_notes WHERE commit_id = ?", (commit_id,))
-        conn.execute("DELETE FROM search_index WHERE commit_id = ?", (commit_id,))
-        conn.execute("DELETE FROM commits WHERE id = ?", (commit_id,))
-        if not conn.execute("SELECT 1 FROM commits WHERE blob_sha = ?", (c["blob_sha"],)).fetchone():
-            for table in ("regions", "captions"):
-                conn.execute(f"DELETE FROM {table} WHERE blob_sha = ?", (c["blob_sha"],))  # noqa: S608
-            blob = conn.execute("SELECT path, thumb_path FROM blobs WHERE sha256 = ?", (c["blob_sha"],)).fetchone()
-            files += [blob["path"], blob["thumb_path"]]
-            conn.execute("DELETE FROM blobs WHERE sha256 = ?", (c["blob_sha"],))
-        if c["source_sha"] and not conn.execute("SELECT 1 FROM commits WHERE source_sha = ?", (c["source_sha"],)).fetchone():
-            files.append(conn.execute("SELECT path FROM sources WHERE sha256 = ?", (c["source_sha"],)).fetchone()["path"])
-            conn.execute("DELETE FROM sources WHERE sha256 = ?", (c["source_sha"],))
+        files = _delete(conn, commit_id)
     for rel in files:
         storage.abs_path(rel).unlink(missing_ok=True)
+
+
+def _delete(conn: sqlite3.Connection, commit_id: int) -> list[str]:
+    """delete() inside the caller's transaction; returns the files to remove once it commits."""
+    c = conn.execute("SELECT * FROM commits WHERE id = ?", (commit_id,)).fetchone()
+    if c is None:
+        raise CannotDelete(f"Commit {commit_id} not found", 404)
+    parent = c["parent_id"]
+    conn.execute("UPDATE commits SET parent_id = ? WHERE parent_id = ?", (parent, commit_id))
+    # A merge of the deleted version now merges the one before it, unless that's already its parent.
+    conn.execute("UPDATE commits SET merge_parent_id = CASE WHEN parent_id IS ? THEN NULL ELSE ? END"
+                 " WHERE merge_parent_id = ?", (parent, parent, commit_id))
+    conn.execute("UPDATE branches SET head_commit_id = ? WHERE head_commit_id = ?", (parent, commit_id))
+
+    files = [r[0] for r in conn.execute("SELECT audio_path FROM voice_notes WHERE commit_id = ? AND audio_path IS NOT NULL", (commit_id,))]
+    conn.execute("UPDATE merges SET base_commit = NULL WHERE base_commit = ?", (commit_id,))
+    # Includes the diffs of versions that were built on it; they're recomputed against their new parent.
+    conn.execute("DELETE FROM diffs WHERE from_commit = ? OR to_commit = ?", (commit_id, commit_id))
+    conn.execute("DELETE FROM voice_notes WHERE commit_id = ?", (commit_id,))
+    conn.execute("DELETE FROM search_index WHERE commit_id = ?", (commit_id,))
+    conn.execute("DELETE FROM commits WHERE id = ?", (commit_id,))
+    if not conn.execute("SELECT 1 FROM commits WHERE blob_sha = ?", (c["blob_sha"],)).fetchone():
+        for table in ("regions", "captions"):
+            conn.execute(f"DELETE FROM {table} WHERE blob_sha = ?", (c["blob_sha"],))  # noqa: S608
+        blob = conn.execute("SELECT path, thumb_path FROM blobs WHERE sha256 = ?", (c["blob_sha"],)).fetchone()
+        files += [blob["path"], blob["thumb_path"]]
+        conn.execute("DELETE FROM blobs WHERE sha256 = ?", (c["blob_sha"],))
+    if c["source_sha"] and not conn.execute("SELECT 1 FROM commits WHERE source_sha = ?", (c["source_sha"],)).fetchone():
+        files.append(conn.execute("SELECT path FROM sources WHERE sha256 = ?", (c["source_sha"],)).fetchone()["path"])
+        conn.execute("DELETE FROM sources WHERE sha256 = ?", (c["source_sha"],))
+    return files
+
+
+def delete_branch(conn: sqlite3.Connection, branch_id: int) -> list[int]:
+    """Delete a branch and the versions only it has. Versions another branch's history still uses
+    stay, moved onto that branch. Returns the version numbers deleted."""
+    with transaction(conn):
+        br = conn.execute("SELECT * FROM branches WHERE id = ?", (branch_id,)).fetchone()
+        if br is None:
+            raise CannotDelete(f"Branch {branch_id} not found", 404)
+        if br["name"] == "main":
+            raise CannotDelete("main can't be deleted", 400)
+        others = conn.execute("SELECT id, head_commit_id FROM branches WHERE repo_id = ? AND id != ? ORDER BY name != 'main', id",
+                              (br["repo_id"], branch_id)).fetchall()
+        used_by = {}  # commit -> the first other branch whose history includes it
+        for other in others:
+            todo = [other["head_commit_id"]]
+            while todo:
+                c = todo.pop()
+                if c is None or c in used_by:
+                    continue
+                used_by[c] = other["id"]
+                todo += conn.execute("SELECT parent_id, merge_parent_id FROM commits WHERE id = ?", (c,)).fetchone()
+        own = conn.execute("SELECT id, seq FROM commits WHERE branch_id = ? ORDER BY seq DESC", (branch_id,)).fetchall()
+        deleted, files = [], []
+        for c in own:
+            if c["id"] in used_by:
+                conn.execute("UPDATE commits SET branch_id = ? WHERE id = ?", (used_by[c["id"]], c["id"]))
+            else:
+                files += _delete(conn, c["id"])
+                deleted.append(c["seq"])
+        conn.execute("DELETE FROM merges WHERE source_branch = ? OR target_branch = ?", (branch_id, branch_id))
+        conn.execute("DELETE FROM branches WHERE id = ?", (branch_id,))
+    for rel in files:
+        storage.abs_path(rel).unlink(missing_ok=True)
+    return sorted(deleted)
