@@ -104,33 +104,23 @@ class CannotDelete(ValueError):
 
 
 def delete(conn: sqlite3.Connection, commit_id: int) -> None:
-    """Delete a version nothing is built on: the latest one on its branch, with no later version,
-    merge or other branch starting from it. Its branch goes back to the version before. Its notes
-    go with it, and its image and layered file too unless another version uses them."""
+    """Delete any version. Versions built on it are rejoined to the version before it, and branches
+    that ended at it end there instead (an empty branch if it was the first). Its notes go with it,
+    and its image and layered file too unless another version uses them."""
     with transaction(conn):
         c = conn.execute("SELECT * FROM commits WHERE id = ?", (commit_id,)).fetchone()
         if c is None:
             raise CannotDelete(f"Commit {commit_id} not found", 404)
-        v = f"v{c['seq']}"
-        head = conn.execute("SELECT head_commit_id FROM branches WHERE id = ?", (c["branch_id"],)).fetchone()[0]
-        if head != commit_id:
-            raise CannotDelete(f"Only the latest version of a branch can be deleted; {v} has later versions")
-        child = conn.execute(
-            "SELECT seq FROM commits WHERE parent_id = ? OR merge_parent_id = ? ORDER BY seq LIMIT 1", (commit_id, commit_id)
-        ).fetchone()
-        if child:
-            raise CannotDelete(f"v{child[0]} is built on {v}; delete that first")
-        other = conn.execute(
-            "SELECT name FROM branches WHERE head_commit_id = ? AND id != ?", (commit_id, c["branch_id"])
-        ).fetchone()
-        if other:
-            raise CannotDelete(f"The branch '{other[0]}' starts from {v}")
-        if c["analysis_status"] in ("pending", "running"):
-            raise CannotDelete(f"{v} is still being analyzed; try again in a few seconds")
+        parent = c["parent_id"]
+        conn.execute("UPDATE commits SET parent_id = ? WHERE parent_id = ?", (parent, commit_id))
+        # A merge of the deleted version now merges the one before it, unless that's already its parent.
+        conn.execute("UPDATE commits SET merge_parent_id = CASE WHEN parent_id IS ? THEN NULL ELSE ? END"
+                     " WHERE merge_parent_id = ?", (parent, parent, commit_id))
+        conn.execute("UPDATE branches SET head_commit_id = ? WHERE head_commit_id = ?", (parent, commit_id))
 
         files = [r[0] for r in conn.execute("SELECT audio_path FROM voice_notes WHERE commit_id = ? AND audio_path IS NOT NULL", (commit_id,))]
-        conn.execute("UPDATE branches SET head_commit_id = ? WHERE id = ?", (c["parent_id"], c["branch_id"]))
         conn.execute("UPDATE merges SET base_commit = NULL WHERE base_commit = ?", (commit_id,))
+        # Includes the diffs of versions that were built on it; they're recomputed against their new parent.
         conn.execute("DELETE FROM diffs WHERE from_commit = ? OR to_commit = ?", (commit_id, commit_id))
         conn.execute("DELETE FROM voice_notes WHERE commit_id = ?", (commit_id,))
         conn.execute("DELETE FROM search_index WHERE commit_id = ?", (commit_id,))

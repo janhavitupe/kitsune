@@ -96,7 +96,7 @@ Use the search bar above the timeline and describe what you're looking for, like
 - **Story:** turns your history into a write-up of your process for a portfolio.
 - **Download with layers:** gets the full file back for any version that has one.
 - **Private:** tick this at the top to keep captions and search on the project's own self-hosted model. Region naming still uses the hosted service.
-- **Delete this version:** only appears on the latest version of a branch. It removes the version permanently, and it won't work if later work is built on that version.
+- **Delete this version:** works on any version and removes it permanently. Versions after it continue from the one before it, and a branch that started from it starts from that one instead.
 
 ## Using the command line
 

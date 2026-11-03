@@ -40,10 +40,9 @@ export default function CommitDetail({
     }
   };
 
-  // Only the latest version of a branch can go; the server checks nothing else is built on it.
-  const isTip = branches.some((b) => b.name === commit.branch && b.head_commit_id === commit.id);
   const remove = async () => {
-    if (!window.confirm(`Delete v${commit.seq}? Its image and notes are removed for good.`)) return;
+    const before = parent ? `v${parent.seq}` : "nothing";
+    if (!window.confirm(`Delete v${commit.seq}? Its image and notes are removed for good; versions after it continue from ${before}.`)) return;
     try {
       await api.deleteCommit(commit.id);
       setError(null);
@@ -130,11 +129,9 @@ export default function CommitDetail({
               Download with layers (.{commit.source_ext})
             </a>
           )}
-          {isTip && (
-            <button onClick={remove} className="rounded-md border border-red-900 px-3 py-2 text-left text-sm text-red-400 hover:bg-red-950">
-              Delete this version
-            </button>
-          )}
+          <button onClick={remove} className="rounded-md border border-red-900 px-3 py-2 text-left text-sm text-red-400 hover:bg-red-950">
+            Delete this version
+          </button>
           {error && <p className="text-sm text-red-400">{error}</p>}
         </div>
 

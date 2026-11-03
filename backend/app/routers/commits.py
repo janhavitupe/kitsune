@@ -82,7 +82,7 @@ def retry_analysis(commit_id: int, background: BackgroundTasks, conn: sqlite3.Co
 
 @router.delete("/commits/{commit_id}", status_code=204)
 def delete_commit(commit_id: int, conn: sqlite3.Connection = Depends(get_db)):
-    """Delete the latest version of a branch, when nothing is built on it."""
+    """Delete any version; versions built on it continue from the one before it."""
     try:
         commits.delete(conn, commit_id)
     except commits.CannotDelete as e:

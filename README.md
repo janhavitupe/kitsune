@@ -31,7 +31,7 @@ Every AI feature has an honest fallback, so nothing breaks when a model is slow 
 
 **Works next to any paint app.** The `kitsune` command line tracks your paint app's own file (Photoshop `.psd`, Krita `.kra`, OpenRaster `.ora`) or an exported PNG, like git tracks a file: `commit`, `branch`, `switch`, `diff`, `merge`, `pick sky --from v3`, and `watch` to commit every time you save. Every version you commit keeps your whole file with its layers, and `switch` and `checkout` put it back byte for byte. It talks to the same backend, so the browser shows the same history.
 
-**History is append-only.** Cherry-picks, merges, explore variations and the assistant always make new versions; nothing is ever overwritten. You can delete the latest version of a branch (a bring-back you didn't like), but never one that later work is built on.
+**History is append-only.** Cherry-picks, merges, explore variations and the assistant always make new versions; nothing is ever overwritten. You can delete any version you choose; later versions are rejoined to the one before it.
 
 ## Meta models and partners
 
@@ -117,7 +117,7 @@ Before the demo: seed it (`--backend https://<render-url>`), click through every
 
 ```bash
 cd backend
-.venv/Scripts/python -m pytest        # 183 tests; model calls are faked, never real
+.venv/Scripts/python -m pytest        # 186 tests; model calls are faked, never real
 ```
 
 Other scripts: `scripts/probe_model_api.py` (check model ids and response shapes), `scripts/time_openweights.py` (Baseten vs Fireworks latency).

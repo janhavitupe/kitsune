@@ -38,6 +38,8 @@ def run_analysis(commit_id: int) -> None:
         try:
             _set_status(conn, commit_id, "running")
             for step in ANALYSIS_STEPS:
+                if not conn.execute("SELECT 1 FROM commits WHERE id = ?", (commit_id,)).fetchone():
+                    return  # deleted while it was being analyzed
                 step(conn, commit_id)
             _set_status(conn, commit_id, "done")
         except Exception:
